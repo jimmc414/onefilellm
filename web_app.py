@@ -1,14 +1,13 @@
 from flask import Flask, request, render_template_string, send_file
 import os
 import sys
+from urllib.parse import urlparse # Added for robust error display if needed
 
-# Import functions from onefilellm.py. 
-# Ensure onefilellm.py is accessible in the same directory.
-from onefilellm import process_github_repo, process_github_pull_request, process_github_issue
-from onefilellm import process_arxiv_pdf, process_local_folder, fetch_youtube_transcript
-from onefilellm import crawl_and_extract_text, process_doi_or_pmid, get_token_count, preprocess_text, safe_file_read
-from pathlib import Path
-import pyperclip
+# Import functions from onefilellm.py.
+# process_input is the key new import.
+# Specific process_* functions are removed as process_input handles dispatch.
+from onefilellm import process_input, get_token_count, preprocess_text, safe_file_read
+# ENABLE_COMPRESSION_AND_NLTK is a global flag in onefilellm, preprocess_text uses it.
 
 app = Flask(__name__)
 
@@ -23,7 +22,7 @@ template = """
     input[type="text"] { width: 80%; padding: 0.5em; }
     .output-container { margin-top: 2em; }
     .file-links { margin-top: 1em; }
-    pre { background: #f8f8f8; padding: 1em; border: 1px solid #ccc; }
+    pre { background: #f8f8f8; padding: 1em; border: 1px solid #ccc; white-space: pre-wrap; word-wrap: break-word; }
     </style>
 </head>
 <body>
@@ -44,8 +43,8 @@ template = """
         Compressed Tokens: {{ compressed_token_count }}</p>
 
         <div class="file-links">
-            <a href="/download?filename=uncompressed_output.txt">Download Uncompressed Output</a> |
-            <a href="/download?filename=compressed_output.txt">Download Compressed Output</a>
+            <a href="/download?filename=output.xml">Download Uncompressed Output (XML)</a> |
+            <a href="/download?filename=compressed_output.txt">Download Compressed Output (TXT)</a>
         </div>
     </div>
     {% endif %}
@@ -55,63 +54,68 @@ template = """
 
 @app.route("/", methods=["GET", "POST"])
 def index():
+    output_data = None
+    uncompressed_tokens = 0
+    compressed_tokens = 0
+
     if request.method == "POST":
         input_path = request.form.get("input_path", "").strip()
 
-        # Prepare filenames
-        output_file = "uncompressed_output.txt"
+        # Define filenames consistently with onefilellm.py
+        # process_input will return XML, so output_file should reflect that.
+        output_file = "output.xml" 
         processed_file = "compressed_output.txt"
-        urls_list_file = "processed_urls.txt"
+        # urls_list_file is handled by onefilellm.py's crawl_and_extract_text via process_input
 
-        # Determine input type and process accordingly (mirroring logic from onefilellm.py main)
         try:
-            from urllib.parse import urlparse
-            parsed = urlparse(input_path)
+            # Centralized call to process_input
+            # process_input handles its own console, config, and dispatch logic.
+            # It's designed to return an XML string (either content or an error source).
+            final_output = process_input(input_path)
 
-            if "github.com" in input_path:
-                if "/pull/" in input_path:
-                    final_output = process_github_pull_request(input_path)
-                elif "/issues/" in input_path:
-                    final_output = process_github_issue(input_path)
-                else:
-                    final_output = process_github_repo(input_path)
-            elif parsed.scheme in ["http", "https"]:
-                if "youtube.com" in input_path or "youtu.be" in input_path:
-                    final_output = fetch_youtube_transcript(input_path)
-                elif "arxiv.org" in input_path:
-                    final_output = process_arxiv_pdf(input_path)
-                else:
-                    crawl_result = crawl_and_extract_text(input_path, max_depth=2, include_pdfs=True, ignore_epubs=True)
-                    final_output = crawl_result['content']
-                    with open(urls_list_file, 'w', encoding='utf-8') as urls_file:
-                        urls_file.write('\n'.join(crawl_result['processed_urls']))
-            elif (input_path.startswith("10.") and "/" in input_path) or input_path.isdigit():
-                final_output = process_doi_or_pmid(input_path)
+            if final_output is None or not final_output.strip():
+                # This case should ideally be covered by process_input returning an error XML.
+                # However, as a fallback:
+                print(f"Error in web_app: process_input for '{input_path}' returned None or empty.", file=sys.stderr)
+                output_data = f'<source type="error" path="{input_path}"><e>Web app error: Processing returned no output.</e></source>'
             else:
-                final_output = process_local_folder(input_path)
+                output_data = final_output # This is the XML string
 
-            # Write the uncompressed output
-            with open(output_file, "w", encoding="utf-8") as file:
-                file.write(final_output)
+                # Write the uncompressed XML output
+                with open(output_file, "w", encoding="utf-8") as file:
+                    file.write(output_data)
 
-            # Process the compressed output
-            preprocess_text(output_file, processed_file)
+                # Process the compressed output (if ENABLE_COMPRESSION_AND_NLTK is True in onefilellm.py)
+                # preprocess_text reads from output_file (XML) and writes to processed_file (TXT)
+                preprocess_text(output_file, processed_file)
 
-            compressed_text = safe_file_read(processed_file)
-            compressed_token_count = get_token_count(compressed_text)
+                # Token counting
+                # For uncompressed, count tokens from the XML output (get_token_count strips tags)
+                uncompressed_tokens = get_token_count(output_data)
+                
+                # For compressed, read the processed text file
+                if os.path.exists(processed_file):
+                    compressed_text = safe_file_read(processed_file)
+                    compressed_tokens = get_token_count(compressed_text)
+                else:
+                    # This might happen if compression is disabled or failed.
+                    compressed_tokens = 0 
+                    print(f"Warning: Compressed file '{processed_file}' not found for token counting.", file=sys.stderr)
 
-            uncompressed_text = safe_file_read(output_file)
-            uncompressed_token_count = get_token_count(uncompressed_text)
 
-            # Copy to clipboard
-            pyperclip.copy(uncompressed_text)
-
-            return render_template_string(template,
-                                          output=final_output,
-                                          uncompressed_token_count=uncompressed_token_count,
-                                          compressed_token_count=compressed_token_count)
         except Exception as e:
-            return render_template_string(template, output=f"Error: {str(e)}")
+            # This block catches errors that might occur *outside* of process_input's own try-except,
+            # or if process_input itself raises an unexpected exception.
+            print(f"Error in web_app processing for '{input_path}': {e}", file=sys.stderr)
+            # Use the exception message to form an XML error string.
+            output_data = f'<source type="error" path="{input_path}"><e>Web app error: {str(e)}</e></source>'
+            uncompressed_tokens = 0
+            compressed_tokens = 0
+        
+        return render_template_string(template,
+                                      output=output_data,
+                                      uncompressed_token_count=uncompressed_tokens,
+                                      compressed_token_count=compressed_tokens)
 
     return render_template_string(template)
 
@@ -119,10 +123,19 @@ def index():
 @app.route("/download")
 def download():
     filename = request.args.get("filename")
-    if filename and os.path.exists(filename):
+    # Security: Basic check to prevent arbitrary file access.
+    # In a production app, you'd want more robust validation.
+    allowed_files = ["output.xml", "compressed_output.txt"]
+    if filename in allowed_files and os.path.exists(filename):
         return send_file(filename, as_attachment=True)
-    return "File not found", 404
+    return "File not found or access denied", 404
 
 if __name__ == "__main__":
+    # Ensure the onefilellm.py script can be found if it's not in the default Python path
+    # This is usually not needed if they are in the same directory.
+    # script_dir = os.path.dirname(os.path.abspath(__file__))
+    # if script_dir not in sys.path:
+    #    sys.path.insert(0, script_dir)
+
     # Run the app in debug mode for local development
     app.run(debug=True, host="0.0.0.0", port=5000)

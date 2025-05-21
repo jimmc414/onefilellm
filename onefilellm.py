@@ -1,13 +1,13 @@
 import requests
 from bs4 import BeautifulSoup, Comment
 from urllib.parse import urljoin, urlparse
-from PyPDF2 import PdfReader
+from PyPDF2 import PdfReader 
 import os
 import sys
 import json
 import tiktoken
-import nltk
-from nltk.corpus import stopwords
+import nltk 
+from nltk.corpus import stopwords 
 import re
 import nbformat
 from nbconvert import PythonExporter
@@ -15,45 +15,31 @@ from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api.formatters import TextFormatter
 import pyperclip
 from pathlib import Path
-import wget
-from rich import print
-from rich.console import Console
+import io 
+import html 
+
+from rich import print 
+from rich.console import Console 
 from rich.panel import Panel
 from rich.text import Text
 from rich.prompt import Prompt
 from rich.progress import Progress, TextColumn, BarColumn, TimeRemainingColumn
-import xml.etree.ElementTree as ET # Keep for preprocess_text if needed
+import xml.etree.ElementTree as ET 
 import pandas as pd
-from typing import Union, List, Dict
+from typing import Union, List, Dict, Any 
 
-# Try to import yaml, but don't fail if not available
 try:
     import yaml
 except ImportError:
     yaml = None
     print("[Warning] PyYAML module not found. YAML format detection/parsing will be limited.", file=sys.stderr)
 
-# --- Configuration Flags ---
-ENABLE_COMPRESSION_AND_NLTK = False # Set to True to enable NLTK download, stopword removal, and compressed output
-# --- End Configuration Flags ---
-
-# --- Output Format Notes ---
-# This script produces output wrapped in XML-like tags for structure (e.g., <source>, <file>).
-# However, the *content* within these tags (especially code) is NOT XML-escaped.
-# This means characters like < > & within code blocks are preserved as-is for readability
-# and correct interpretation by LLMs. The escape_xml function currently returns text unchanged.
-# --- End Output Format Notes ---
-
-# --- Configuration Directories ---
+ENABLE_COMPRESSION_AND_NLTK = False
 EXCLUDED_DIRS = ["dist", "node_modules", ".git", "__pycache__"]
-
-# --- Alias Configuration ---
 ALIAS_DIR_NAME = ".onefilellm_aliases"
 ALIAS_DIR = Path.home() / ALIAS_DIR_NAME
-# --- End Alias Configuration ---
 
 def ensure_alias_dir_exists():
-    """Ensures the alias directory exists, creating it if necessary."""
     ALIAS_DIR.mkdir(parents=True, exist_ok=True)
 
 def safe_file_read(filepath, fallback_encoding='latin1'):
@@ -65,241 +51,91 @@ def safe_file_read(filepath, fallback_encoding='latin1'):
             return file.read()
 
 def read_from_clipboard() -> str | None:
-    """
-    Retrieves text content from the system clipboard.
-
-    Returns:
-        str | None: The text content from the clipboard, or None if empty or error.
-    """
     try:
         clipboard_content = pyperclip.paste()
-        if clipboard_content and clipboard_content.strip():
-            return clipboard_content
-        else:
-            # console.print("[bold yellow]Warning: Clipboard is empty or contains only whitespace.[/bold yellow]") # Console accessible in main
-            return None
+        return clipboard_content if clipboard_content and clipboard_content.strip() else None
     except pyperclip.PyperclipException as e:
-        # This error will be handled more visibly in main()
-        print(f"[DEBUG] PyperclipException in read_from_clipboard: {e}", file=sys.stderr) # For debugging
+        print(f"[DEBUG] PyperclipException in read_from_clipboard: {e}", file=sys.stderr)
         return None
-    except Exception as e: # Catch any other unexpected errors
+    except Exception as e:
         print(f"[DEBUG] Unexpected error in read_from_clipboard: {e}", file=sys.stderr)
         return None
 
 def read_from_stdin() -> str | None:
-    """
-    Reads all available text from standard input (sys.stdin).
-
-    Returns:
-        str | None: The text content read from stdin, or None if no data is piped.
-    """
     if sys.stdin.isatty():
-        # stdin is connected to a terminal, not a pipe
-        # This situation should ideally be caught in main() before calling this.
-        # print("[DEBUG] read_from_stdin called but stdin is a TTY.", file=sys.stderr)
         return None
     try:
-        # Read all lines from stdin
         stdin_content = sys.stdin.read()
-        if stdin_content and stdin_content.strip():
-            return stdin_content
-        else:
-            return None
+        return stdin_content if stdin_content and stdin_content.strip() else None
     except Exception as e:
         print(f"[DEBUG] Error reading from stdin: {e}", file=sys.stderr)
         return None
 
 def detect_text_format(text_sample: str) -> str:
-    """
-    Analyzes a sample of input text to guess its format.
-    Returns a string identifier for the detected format.
-    """
-    if not text_sample or not text_sample.strip():
-        return "text" # Default for empty or whitespace-only
-
-    # Make a sample for some checks if text is very long, e.g. first 2000 chars
+    if not text_sample or not text_sample.strip(): return "text"
     sample = text_sample[:2000].strip()
-
-    # 1. Try JSON (most specific)
     try:
-        # Check if it looks like an object or array before trying to parse
         if (sample.startswith('{') and sample.endswith('}')) or \
            (sample.startswith('[') and sample.endswith(']')):
-            json.loads(text_sample) # Try parsing the full text_sample for accuracy
+            json.loads(text_sample)
             return "json"
-    except json.JSONDecodeError:
-        pass # Not JSON
-
-    # 2. Try YAML (if PyYAML is available and imported)
-    if 'yaml' in sys.modules and yaml is not None: # Check if yaml module was successfully imported
+    except json.JSONDecodeError: pass
+    if 'yaml' in sys.modules and yaml is not None:
         try:
-            # YAML can be complex to detect with regex. Parsing is more reliable.
-            # Only try parsing if it has some common YAML indicators.
-            if ":" in sample and "\n" in sample: # Basic check for key-value and newlines
-                yaml.safe_load(text_sample) # Try parsing the full text_sample
+            if ":" in sample and "\n" in sample:
+                yaml.safe_load(text_sample)
                 return "yaml"
-        except (yaml.YAMLError, AttributeError): # AttributeError if yaml not fully imported
-             pass # Not YAML
-
-    # 3. Try HTML (look for tags)
-    # Simple regex for HTML tags - can be improved
+        except (yaml.YAMLError, AttributeError): pass
     if re.search(r"<[^>]+>", sample) and \
        (re.search(r"<html[^>]*>", sample, re.IGNORECASE) or \
         re.search(r"<body[^>]*>", sample, re.IGNORECASE) or \
         re.search(r"<div[^>]*>", sample, re.IGNORECASE) or \
         re.search(r"<p[^>]*>", sample, re.IGNORECASE)):
         return "html"
-
-    # 4. Try Markdown (look for common patterns)
-    # More robust Markdown detection could involve more checks
     if re.search(r"^(#\s|\#{2,6}\s)", sample, re.MULTILINE) or \
        re.search(r"^(\*\s|-\s|\+\s|\d+\.\s)", sample, re.MULTILINE) or \
        re.search(r"\[.+?\]\(.+?\)", sample) or \
        re.search(r"(\*\*|__).+?(\*\*|__)", sample) or \
        re.search(r"(\*|_).+?(\*|_)", sample):
         return "markdown"
-        
-    # TODO: Add heuristics for "doculing" and "markitdown" when their syntax is known.
-    # Example placeholder:
-    # if "DOCULING_SPECIFIC_MARKER" in sample:
-    #     return "doculing"
-
-    # 5. Default to plain text
     return "text"
 
-def parse_as_plaintext(text_content: str) -> str:
-    """Returns the plain text content as is."""
-    return text_content
-
-def parse_as_markdown(text_content: str) -> str:
-    """For V1, returns the Markdown text as is. Future versions might convert to HTML."""
-    return text_content
-
+def parse_as_plaintext(text_content: str) -> str: return text_content
+def parse_as_markdown(text_content: str) -> str: return text_content
 def parse_as_json(text_content: str) -> str:
-    """
-    Validates and returns the JSON string.
-    Raises json.JSONDecodeError if invalid.
-    """
-    json.loads(text_content) # This will raise an error if invalid
+    json.loads(text_content)
     return text_content
-
 def parse_as_html(text_content: str) -> str:
-    """Extracts plain text from HTML content."""
-    from bs4 import BeautifulSoup # Ensure BeautifulSoup is imported
     soup = BeautifulSoup(text_content, 'html.parser')
-    # Remove scripts, styles, etc. that are noisy
     for element in soup(['script', 'style', 'head', 'title', 'meta', '[document]', 'nav', 'footer', 'aside']):
         element.decompose()
-    # Get text, try to preserve some structure with newlines
     return soup.get_text(separator='\n', strip=True)
-
 def parse_as_yaml(text_content: str) -> str:
-    """
-    Validates and returns the YAML string.
-    Requires PyYAML. Raises yaml.YAMLError if invalid.
-    """
-    if 'yaml' not in sys.modules or yaml is None:
-        # print("[Warning] PyYAML module not available. Cannot parse as YAML. Returning as plain text.", file=sys.stderr)
-        return text_content # Fallback if yaml not imported
-    yaml.safe_load(text_content) # This will raise an error if invalid
+    if 'yaml' not in sys.modules or yaml is None: return text_content
+    yaml.safe_load(text_content)
     return text_content
-
-# --- Placeholders for custom formats ---
-def parse_as_doculing(text_content: str) -> str:
-    """Placeholder for Doculing parsing. Returns text as is for V1."""
-    # TODO: Implement actual Doculing parsing logic when specifications are available.
-    return text_content
-
-def parse_as_markitdown(text_content: str) -> str:
-    """Placeholder for Markitdown parsing. Returns text as is for V1."""
-    # TODO: Implement actual Markitdown parsing logic when specifications are available.
-    return text_content
+def parse_as_doculing(text_content: str) -> str: return text_content
+def parse_as_markitdown(text_content: str) -> str: return text_content
 
 def get_parser_for_format(format_name: str) -> callable:
-    """
-    Returns the appropriate parser function based on the format name.
-    Defaults to parse_as_plaintext if format is unknown.
-    """
-    parsers = {
-        "text": parse_as_plaintext,
-        "markdown": parse_as_markdown,
-        "json": parse_as_json,
-        "html": parse_as_html,
-        "yaml": parse_as_yaml,
-        "doculing": parse_as_doculing,       # Placeholder
-        "markitdown": parse_as_markitdown,   # Placeholder
-    }
-    return parsers.get(format_name, parse_as_plaintext) # Default to plaintext parser
+    parsers = {"text": parse_as_plaintext, "markdown": parse_as_markdown, "json": parse_as_json,
+               "html": parse_as_html, "yaml": parse_as_yaml, "doculing": parse_as_doculing,
+               "markitdown": parse_as_markitdown}
+    return parsers.get(format_name, parse_as_plaintext)
 
 def process_text_stream(raw_text_content: str, source_info: dict, console: Console, format_override: str | None = None) -> str | None:
-    """
-    Processes text from a stream (stdin or clipboard).
-    Detects format, parses, and builds the XML structure.
-
-    Args:
-        raw_text_content (str): The raw text from the input stream.
-        source_info (dict): Information about the source, e.g., {'type': 'stdin'}.
-        console (Console): The Rich console object for printing messages.
-        format_override (str | None): User-specified format, if any.
-
-    Returns:
-        str | None: The XML structured output string, or None if processing fails.
-    """
-    actual_format = ""
-    parsed_content = ""
-
-    if format_override:
-        actual_format = format_override.lower()
-        console.print(f"[green]Processing input as [bold]{actual_format}[/bold] (user override).[/green]")
-    else:
-        actual_format = detect_text_format(raw_text_content)
-        console.print(f"[green]Detected format: [bold]{actual_format}[/bold][/green]")
-
+    actual_format = format_override.lower() if format_override else detect_text_format(raw_text_content)
+    if format_override: console.print(f"[green]Processing input as [bold]{actual_format}[/bold] (user override).[/green]")
+    else: console.print(f"[green]Detected format: [bold]{actual_format}[/bold][/green]")
     parser_function = get_parser_for_format(actual_format)
-
     try:
         parsed_content = parser_function(raw_text_content)
-    except json.JSONDecodeError as e:
-        console.print(f"[bold red]Error:[/bold red] Input specified or detected as JSON, but it's not valid JSON. Details: {e}")
-        return None
-    except yaml.YAMLError as e: # Assuming PyYAML is used
-        console.print(f"[bold red]Error:[/bold red] Input specified or detected as YAML, but it's not valid YAML. Details: {e}")
-        return None
-    except Exception as e: # Catch-all for other parsing errors
+    except Exception as e:
         console.print(f"[bold red]Error:[/bold red] Failed to parse content as {actual_format}. Details: {e}")
         return None
-
-    # XML Generation for the stream
-    # This XML structure should be consistent with how single files/sources are wrapped.
-    # The escape_xml function currently does nothing, which is correct for content.
-    # Attributes of XML tags *should* be escaped if they could contain special chars,
-    # but 'stdin', 'clipboard', and format names are safe.
-    
     source_type_attr = escape_xml(source_info.get('type', 'unknown_stream'))
     format_attr = escape_xml(actual_format)
-
-    # Build the XML for this specific stream source
-    # This part creates the XML for THIS stream.
-    # It will be wrapped by <onefilellm_output> in main() if it's the only input,
-    # or combined with other sources by combine_xml_outputs() if multiple inputs are supported later.
-    
-    # For now, let's assume process_text_stream provides the content for a single <source> tag
-    # and main() will handle the <onefilellm_output> wrapper.
-    
-    # XML structure should mirror existing <source> tags for files/URLs where possible
-    # but with type="stdin" or type="clipboard".
-    # Instead of <file path="...">, we might have a <content_block> or similar.
-
-    # Let's create a simple XML structure for the stream content.
-    # The content itself (parsed_content) is NOT XML-escaped, preserving its raw form.
-    xml_parts = [
-        f'<source type="{source_type_attr}" processed_as_format="{format_attr}">',
-        f'<content>{escape_xml(parsed_content)}</content>', # escape_xml does nothing to parsed_content
-        f'</source>'
-    ]
-    final_xml_for_stream = "\n".join(xml_parts)
-    
-    return final_xml_for_stream
+    return f'<source type="{source_type_attr}" processed_as_format="{format_attr}">\n<content>{escape_xml(parsed_content)}</content>\n</source>'
 
 stop_words = set()
 if ENABLE_COMPRESSION_AND_NLTK:
@@ -307,1808 +143,798 @@ if ENABLE_COMPRESSION_AND_NLTK:
         nltk.download("stopwords", quiet=True)
         stop_words = set(stopwords.words("english"))
     except Exception as e:
-        print(f"[bold yellow]Warning:[/bold yellow] Failed to download or load NLTK stopwords. Compression will proceed without stopword removal. Error: {e}")
+        print(f"[bold yellow]Warning:[/bold yellow] Failed to download NLTK stopwords. Error: {e}")
 
 TOKEN = os.getenv('GITHUB_TOKEN', 'default_token_here')
 if TOKEN == 'default_token_here':
-    # Consider making this a non-fatal warning or prompt if interactive use is common
-    print("[bold red]Warning:[/bold red] GITHUB_TOKEN environment variable not set. GitHub API requests may fail or be rate-limited.")
-    # raise EnvironmentError("GITHUB_TOKEN environment variable not set.") # Keep commented out if you want it to proceed
-
+    print("[bold red]Warning:[/bold red] GITHUB_TOKEN not set. Some operations may fail.")
 headers = {"Authorization": f"token {TOKEN}"} if TOKEN != 'default_token_here' else {}
 
-def download_file(url, target_path):
-    # Add headers conditionally
-    response = requests.get(url, headers=headers if TOKEN != 'default_token_here' else None)
+
+def download_file(url: str, target_path: str, headers_to_use: dict):
+    response = requests.get(url, headers=headers_to_use)
     response.raise_for_status()
     with open(target_path, "wb") as f:
         f.write(response.content)
 
 def process_ipynb_file(temp_file):
     try:
-        with open(temp_file, "r", encoding='utf-8', errors='ignore') as f:
-            notebook_content = f.read()
+        with open(temp_file, "r", encoding='utf-8', errors='ignore') as f: nb_content = f.read()
         exporter = PythonExporter()
-        python_code, _ = exporter.from_notebook_node(nbformat.reads(notebook_content, as_version=4))
-        return python_code
+        py_code, _ = exporter.from_notebook_node(nbformat.reads(nb_content, as_version=4))
+        return py_code 
     except Exception as e:
         print(f"[bold red]Error processing notebook {temp_file}: {e}[/bold red]")
-        # Return error message instead of raising, wrapped in comments
-        return f"# ERROR PROCESSING NOTEBOOK: {e}\n"
+        return f"# ERROR PROCESSING NOTEBOOK: {escape_xml(str(e))}\n" 
 
+def escape_xml(text: str) -> str:
+    return html.escape(str(text), quote=True)
 
-# --- XML Handling ---
-def escape_xml(text):
-    """
-    Returns the text unchanged.
-    This function previously escaped XML special characters (&, <, >),
-    but that made code content unreadable. It's kept for potential future use
-    (e.g., escaping attributes if needed) but currently acts as a pass-through
-    to ensure code readability within XML tags.
-    """
-    return str(text)
-# --- End XML Handling ---
+def _extract_text_from_pdf_object(pdf_reader: PdfReader, source_description: str, console: Console) -> str:
+    if not pdf_reader.pages:
+        console.print(f"  [bold yellow]Warning:[/bold yellow] PDF file has no pages or is encrypted: {source_description}")
+        return "<e>PDF file has no pages or could not be read (possibly encrypted).</e>"
+    text_list = []
+    for i, page_obj in enumerate(pdf_reader.pages):
+        try:
+            page_text = page_obj.extract_text()
+            if page_text: text_list.append(page_text) 
+            else: console.print(f"  [dim]No text extracted from page {i+1} of {source_description} (blank/image-based).[/dim]")
+        except Exception as page_e:
+            console.print(f"  [bold yellow]Warning:[/bold yellow] Could not extract text from page {i+1} of {source_description}: {page_e}")
+            text_list.append(f"\n<e>Error extracting text from page {i+1}: {escape_xml(str(page_e))}</e>\n") 
+    if not text_list:
+        console.print(f"  [bold yellow]Warning:[/bold yellow] No text extracted from any page of PDF: {source_description}")
+        return "<e>No text could be extracted from PDF.</e>"
+    return ' '.join(text_list) 
 
-
-def process_github_repo(repo_url):
-    """
-    Processes a GitHub repository, extracting file contents and wrapping them in XML structure.
-    """
+def process_github_repo(repo_url: str, headers_to_use: dict):
     api_base_url = "https://api.github.com/repos/"
     repo_url_parts = repo_url.split("https://github.com/")[-1].split("/")
     repo_name = "/".join(repo_url_parts[:2])
-    branch_or_tag = ""
-    subdirectory = ""
-
+    branch_or_tag, subdirectory = "", ""
     if len(repo_url_parts) > 2 and repo_url_parts[2] == "tree":
-        if len(repo_url_parts) > 3:
-            branch_or_tag = repo_url_parts[3]
-        if len(repo_url_parts) > 4:
-            subdirectory = "/".join(repo_url_parts[4:])
-    
+        if len(repo_url_parts) > 3: branch_or_tag = repo_url_parts[3]
+        if len(repo_url_parts) > 4: subdirectory = "/".join(repo_url_parts[4:])
     contents_url = f"{api_base_url}{repo_name}/contents"
-    if subdirectory:
-        contents_url = f"{contents_url}/{subdirectory}"
-    if branch_or_tag:
-        contents_url = f"{contents_url}?ref={branch_or_tag}"
-
-    # Start XML structure
-    repo_content = [f'<source type="github_repository" url="{escape_xml(repo_url)}">']
-
-    def process_directory_recursive(url, repo_content_list):
+    if subdirectory: contents_url = f"{contents_url}/{subdirectory}"
+    if branch_or_tag: contents_url = f"{contents_url}?ref={branch_or_tag}"
+    
+    repo_content_xml = [f'<source type="github_repository" url="{escape_xml(repo_url)}">']
+    
+    def process_directory_recursive(url, content_list_xml):
         try:
-            response = requests.get(url, headers=headers)
-            response.raise_for_status()
-            files = response.json()
-
+            response = requests.get(url, headers=headers_to_use); response.raise_for_status(); files = response.json()
             for file_info in files:
-                if file_info["type"] == "dir" and file_info["name"] in EXCLUDED_DIRS:
-                    continue
-
+                if file_info["type"] == "dir" and file_info["name"] in EXCLUDED_DIRS: continue
                 if file_info["type"] == "file" and is_allowed_filetype(file_info["name"]):
                     print(f"Processing {file_info['path']}...")
                     temp_file = f"temp_{file_info['name']}"
                     try:
-                        download_file(file_info["download_url"], temp_file)
-                        repo_content_list.append(f'\n<file path="{escape_xml(file_info["path"])}">')
-                        if file_info["name"].endswith(".ipynb"):
-                            # Append raw code - escape_xml not needed as it does nothing
-                            repo_content_list.append(process_ipynb_file(temp_file))
-                        else:
-                            # Append raw code - escape_xml not needed here
-                            repo_content_list.append(safe_file_read(temp_file))
-                        repo_content_list.append('</file>')
+                        download_file(file_info["download_url"], temp_file, headers_to_use=headers_to_use)
+                        content_list_xml.append(f'\n<file path="{escape_xml(file_info["path"])}">')
+                        file_content_raw = ""
+                        if file_info["name"].endswith(".ipynb"): file_content_raw = process_ipynb_file(temp_file)
+                        else: file_content_raw = safe_file_read(temp_file)
+                        content_list_xml.append(escape_xml(file_content_raw)) 
+                        content_list_xml.append('</file>')
                     except Exception as e:
                         print(f"[bold red]Error processing file {file_info['path']}: {e}[/bold red]")
-                        repo_content_list.append(f'\n<file path="{escape_xml(file_info["path"])}">')
-                        repo_content_list.append(f'<error>Failed to download or process: {escape_xml(str(e))}</error>')
-                        repo_content_list.append('</file>')
+                        content_list_xml.extend([f'\n<file path="{escape_xml(file_info["path"])}">', f'<error>Failed to download/process: {escape_xml(str(e))}</error>', '</file>'])
                     finally:
-                        if os.path.exists(temp_file):
-                            os.remove(temp_file)
+                        if os.path.exists(temp_file): os.remove(temp_file)
+                elif file_info["type"] == "dir": process_directory_recursive(file_info["url"], content_list_xml)
+        except Exception as e:
+            print(f"[bold red]Error processing directory {url}: {e}[/bold red]")
+            content_list_xml.append(f'<error>Failed processing directory {escape_xml(url)}: {escape_xml(str(e))}</error>')
 
-                elif file_info["type"] == "dir":
-                    process_directory_recursive(file_info["url"], repo_content_list)
-        except requests.exceptions.RequestException as e:
-            print(f"[bold red]Error fetching directory {url}: {e}[/bold red]")
-            repo_content_list.append(f'<error>Failed to fetch directory {escape_xml(url)}: {escape_xml(str(e))}</error>')
-        except Exception as e: # Catch other potential errors like JSON parsing
-             print(f"[bold red]Error processing directory {url}: {e}[/bold red]")
-             repo_content_list.append(f'<error>Failed processing directory {escape_xml(url)}: {escape_xml(str(e))}</error>')
-
-
-    process_directory_recursive(contents_url, repo_content)
-    repo_content.append('\n</source>') # Close source tag
+    process_directory_recursive(contents_url, repo_content_xml)
+    repo_content_xml.append('\n</source>')
     print("GitHub repository processing finished.")
-    return "\n".join(repo_content)
+    return "\n".join(repo_content_xml)
 
 def process_local_folder(local_path):
-    """
-    Processes a local directory, extracting file contents and wrapping them in XML structure.
-    """
-    def process_local_directory_recursive(current_path, content_list):
+    content_xml = [f'<source type="local_folder" path="{escape_xml(local_path)}">']
+    def process_local_directory_recursive(current_path, content_list_xml):
         try:
             for item in os.listdir(current_path):
                 item_path = os.path.join(current_path, item)
                 relative_path = os.path.relpath(item_path, local_path)
-
                 if os.path.isdir(item_path):
-                    if item not in EXCLUDED_DIRS:
-                        process_local_directory_recursive(item_path, content_list)
-                elif os.path.isfile(item_path):
-                    if is_allowed_filetype(item):
-                        print(f"Processing {item_path}...")
-                        content_list.append(f'\n<file path="{escape_xml(relative_path)}">')
-                        try:
-                            if item.lower().endswith(".ipynb"): # Case-insensitive check
-                                content_list.append(process_ipynb_file(item_path))
-                            elif item.lower().endswith(".pdf"): # Case-insensitive check
-                                content_list.append(_process_pdf_content_from_path(item_path))
-                            elif item.lower().endswith(('.xls', '.xlsx')): # Case-insensitive check for Excel files
-                                # Need to pop the opening file tag we already added
-                                content_list.pop()  # Remove the <file> tag
-                                
-                                # Generate Markdown for each sheet
-                                try:
-                                    for sheet, md in excel_to_markdown(item_path).items():
-                                        virtual_name = f"{os.path.splitext(relative_path)[0]}_{sheet}.md"
-                                        content_list.append(f'\n<file path="{escape_xml(virtual_name)}">')
-                                        content_list.append(md)      # raw Markdown table
-                                        content_list.append('</file>')
-                                except Exception as e:
-                                    print(f"[bold red]Error processing Excel file {item_path}: {e}[/bold red]")
-                                    # Re-add the original file tag for the error message
-                                    content_list.append(f'\n<file path="{escape_xml(relative_path)}">')
-                                    content_list.append(f'<e>Failed to process Excel file: {escape_xml(str(e))}</e>')
-                                    content_list.append('</file>')
-                                continue  # Skip the final </file> for Excel files
-                            else:
-                                content_list.append(safe_file_read(item_path))
-                        except Exception as e:
-                            print(f"[bold red]Error reading file {item_path}: {e}[/bold red]")
-                            content_list.append(f'<error>Failed to read file: {escape_xml(str(e))}</error>')
-                        content_list.append('</file>')
+                    if item not in EXCLUDED_DIRS: process_local_directory_recursive(item_path, content_list_xml)
+                elif os.path.isfile(item_path) and is_allowed_filetype(item):
+                    print(f"Processing {item_path}...")
+                    content_list_xml.append(f'\n<file path="{escape_xml(relative_path)}">')
+                    try:
+                        file_content_raw = ""
+                        if item.lower().endswith(".ipynb"): file_content_raw = process_ipynb_file(item_path)
+                        elif item.lower().endswith(".pdf"): file_content_raw = _process_pdf_content_from_path(item_path) 
+                        elif item.lower().endswith(('.xls', '.xlsx')):
+                            content_list_xml.pop() 
+                            for sheet, md in excel_to_markdown(item_path).items(): 
+                                virtual_name = f"{os.path.splitext(relative_path)[0]}_{sheet}.md"
+                                content_list_xml.extend([f'\n<file path="{escape_xml(virtual_name)}">', escape_xml(md), '</file>'])
+                            continue 
+                        else: file_content_raw = safe_file_read(item_path)
+                        if not item.lower().endswith(".pdf") and not item.lower().endswith(('.xls', '.xlsx')):
+                            content_list_xml.append(escape_xml(file_content_raw))
+                        elif item.lower().endswith(".pdf"): 
+                             content_list_xml.append(file_content_raw) # Already text or <e>
+                    except Exception as e:
+                        print(f"[bold red]Error reading file {item_path}: {e}[/bold red]")
+                        content_list_xml.append(f'<error>Failed to read file: {escape_xml(str(e))}</error>')
+                    content_list_xml.append('</file>')
         except Exception as e:
-             print(f"[bold red]Error reading directory {current_path}: {e}[/bold red]")
-             content_list.append(f'<error>Failed reading directory {escape_xml(current_path)}: {escape_xml(str(e))}</error>')
-
-
-    # Start XML structure
-    content = [f'<source type="local_folder" path="{escape_xml(local_path)}">']
-    process_local_directory_recursive(local_path, content)
-    content.append('\n</source>') # Close source tag
-
+            print(f"[bold red]Error reading directory {current_path}: {e}[/bold red]")
+            content_list_xml.append(f'<error>Failed reading directory {escape_xml(current_path)}: {escape_xml(str(e))}</error>')
+    process_local_directory_recursive(local_path, content_xml)
+    content_xml.append('\n</source>')
     print("Local folder processing finished.")
-    return '\n'.join(content)
+    return '\n'.join(content_xml)
 
-
-def _process_pdf_content_from_path(file_path):
-    """
-    Extracts text content from a local PDF file.
-    Returns the extracted text or an error message string.
-    """
-    print(f"  Extracting text from local PDF: {file_path}")
-    text_list = []
+def _process_pdf_content_from_path(file_path: str) -> str:
+    console = Console() 
+    console.print(f"  Extracting text from local PDF: {file_path}")
     try:
         with open(file_path, 'rb') as pdf_file_obj:
             pdf_reader = PdfReader(pdf_file_obj)
-            if not pdf_reader.pages:
-                print(f"  [bold yellow]Warning:[/bold yellow] PDF file has no pages or is encrypted: {file_path}")
-                return "<e>PDF file has no pages or could not be read (possibly encrypted).</e>"
-            
-            for i, page_obj in enumerate(pdf_reader.pages):
-                try:
-                    page_text = page_obj.extract_text()
-                    if page_text:
-                        text_list.append(page_text)
-                except Exception as page_e: # Catch error extracting from a specific page
-                     print(f"  [bold yellow]Warning:[/bold yellow] Could not extract text from page {i+1} of {file_path}: {page_e}")
-                     text_list.append(f"\n<e>Could not extract text from page {i+1}.</e>\n")
-        
-        if not text_list:
-             print(f"  [bold yellow]Warning:[/bold yellow] No text could be extracted from PDF: {file_path}")
-             return "<e>No text could be extracted from PDF.</e>"
-
-        return ' '.join(text_list)
-    except Exception as e:
-        print(f"[bold red]Error reading PDF file {file_path}: {e}[/bold red]")
+            return _extract_text_from_pdf_object(pdf_reader, file_path, console) 
+    except FileNotFoundError:
+        console.print(f"[bold red]Error: PDF file not found at {file_path}[/bold red]")
+        return f"<e>PDF file not found: {escape_xml(file_path)}</e>"
+    except Exception as e: 
+        console.print(f"[bold red]Error reading PDF file {file_path}: {e}[/bold red]")
         return f"<e>Failed to read or process PDF file: {escape_xml(str(e))}</e>"
 
-def _download_and_read_file(url):
-    """
-    Downloads and reads the content of a file from a URL.
-    Returns the content as text or an error message string.
-    """
+def _download_and_read_file(url: str, headers_to_use: dict):
     print(f"  Downloading and reading content from: {url}")
     try:
-        # Add headers conditionally
-        response = requests.get(url, headers=headers if TOKEN != 'default_token_here' else None)
-        response.raise_for_status()
-        
-        # Try to determine encoding
+        response = requests.get(url, headers=headers_to_use); response.raise_for_status()
         encoding = response.encoding or 'utf-8'
-        
-        try:
-            # Try to decode as text
-            content = response.content.decode(encoding)
-            return content
+        try: return response.content.decode(encoding) 
         except UnicodeDecodeError:
-            # If that fails, try a fallback encoding
-            try:
-                content = response.content.decode('latin-1')
-                return content
-            except Exception as decode_err:
-                print(f"  [bold yellow]Warning:[/bold yellow] Could not decode content: {decode_err}")
-                return f"<e>Failed to decode content: {escape_xml(str(decode_err))}</e>"
-                
-    except requests.RequestException as e:
-        print(f"[bold red]Error downloading file from {url}: {e}[/bold red]")
-        return f"<e>Failed to download file: {escape_xml(str(e))}</e>"
-    except Exception as e:
-        print(f"[bold red]Unexpected error processing file from {url}: {e}[/bold red]")
-        return f"<e>Unexpected error: {escape_xml(str(e))}</e>"
+            try: return response.content.decode('latin-1') 
+            except Exception as de: return f"<e>Failed to decode content: {escape_xml(str(de))}</e>"
+    except requests.RequestException as e: return f"<e>Failed to download file: {escape_xml(str(e))}</e>"
+    except Exception as e: return f"<e>Unexpected error: {escape_xml(str(e))}</e>"
 
-
-def excel_to_markdown(
-    file_path: Union[str, Path],
-    *,
-    skip_rows: int = 0,  # Changed from 3 to 0 to not skip potential headers
-    min_header_cells: int = 2,
-    sheet_filter: List[str] | None = None,
+def _convert_excel_sheets_to_markdown(
+    workbook_data: Union[pd.ExcelFile, Dict[str, pd.DataFrame]], 
+    source_description: str, 
+    console: Console,
+    skip_rows: int = 0, 
+    min_header_cells: int = 2, 
+    sheet_filter: List[str] | None = None
 ) -> Dict[str, str]:
-    """
-    Convert an Excel workbook (.xls / .xlsx) to Markdown.
+    md_tables: Dict[str, str] = {}
+    sheet_names = []
+    if isinstance(workbook_data, pd.ExcelFile): sheet_names = workbook_data.sheet_names
+    elif isinstance(workbook_data, dict): sheet_names = list(workbook_data.keys())
+    else:
+        console.print(f"[bold red]Error: Invalid workbook_data for '{source_description}'.[/bold red]"); return md_tables
+    if not sheet_names:
+        console.print(f"[bold yellow]Warning: No sheets in Excel: {source_description}[/bold yellow]"); return md_tables
 
-    Parameters
-    ----------
-    file_path :
-        Path to the workbook.
-    skip_rows :
-        How many leading rows to ignore before we start hunting for a header row.
-        Default is 0 to ensure we don't miss any potential headers.
-    min_header_cells :
-        Minimum number of non-NA cells that makes a row "look like" a header.
-    sheet_filter :
-        Optional list of sheet names to include (exact match, case-sensitive).
-
-    Returns
-    -------
-    Dict[str, str]
-        Mapping of ``sheet_name → markdown_table``.
-        Empty dict means the workbook had no usable sheets by the above rules.
-
-    Raises
-    ------
-    ValueError
-        If the file extension is not .xls or .xlsx.
-    RuntimeError
-        If *none* of the sheets meet the header-detection criteria.
-    """
-    file_path = Path(file_path).expanduser().resolve()
-    if file_path.suffix.lower() not in {".xls", ".xlsx"}:
-        raise ValueError("Only .xls/.xlsx files are supported")
-
-    print(f"Processing Excel file: {file_path}")
-    
-    # For simple Excel files, it's often better to use header=0 directly
-    # Try both approaches: first with automatic header detection, then fallback to header=0
-    try:
-        # Let pandas pick the right engine (openpyxl for xlsx, xlrd/pyxlsb if installed for xls)
-        wb = pd.read_excel(file_path, sheet_name=None, header=None)
-
-        md_tables: Dict[str, str] = {}
-
-        for name, df in wb.items():
-            if sheet_filter and name not in sheet_filter:
-                continue
-
-            df = df.iloc[skip_rows:].reset_index(drop=True)
-            try:
-                # Try to find a header row
-                header_idx = next(i for i, row in df.iterrows() if row.count() >= min_header_cells)
-                
-                # Use ffill instead of deprecated method parameter
-                header = df.loc[header_idx].copy()
-                header = header.ffill()  # Forward-fill NaN values
-                
-                body = df.loc[header_idx + 1:].copy()
-                body.columns = header
-                body.dropna(how="all", inplace=True)
-                
-                # Convert to markdown
-                md_tables[name] = body.to_markdown(index=False)
-                print(f"  Processed sheet '{name}' with detected header")
-                
-            except StopIteration:
-                # No row looked like a header - skip for now, we'll try again with header=0
-                print(f"  No header detected in sheet '{name}', will try fallback")
-                continue
-
-        # If no headers were found with our heuristic, try again with header=0
-        if not md_tables:
-            print("  No headers detected with heuristic, trying with fixed header row")
-            wb = pd.read_excel(file_path, sheet_name=None, header=0)
-            
-            for name, df in wb.items():
-                if sheet_filter and name not in sheet_filter:
-                    continue
-                    
-                # Drop rows that are all NaN
-                df = df.dropna(how="all")
-                
-                # Convert to markdown
-                md_tables[name] = df.to_markdown(index=False)
-                print(f"  Processed sheet '{name}' with fixed header")
-
-        if not md_tables:
-            raise RuntimeError("Workbook contained no sheets with usable data")
-
-        return md_tables
-        
-    except Exception as e:
-        print(f"Error processing Excel file: {e}")
-        # Last resort: try with the most basic approach
-        wb = pd.read_excel(file_path, sheet_name=None)
-        md_tables = {name: df.to_markdown(index=False) for name, df in wb.items() 
-                    if not (sheet_filter and name not in sheet_filter)}
-                    
-        if not md_tables:
-            raise RuntimeError(f"Failed to extract any usable data from Excel file: {e}")
-            
-        return md_tables
-
-
-def excel_to_markdown_from_url(
-    url: str,
-    *,
-    skip_rows: int = 0,  # Changed from 3 to 0 to not skip potential headers
-    min_header_cells: int = 2,
-    sheet_filter: List[str] | None = None,
-) -> Dict[str, str]:
-    """
-    Download an Excel workbook from a URL and convert it to Markdown.
-    
-    This function downloads the Excel file from the URL to a BytesIO buffer
-    and then processes it using excel_to_markdown.
-    
-    Parameters are the same as excel_to_markdown.
-    
-    Returns
-    -------
-    Dict[str, str]
-        Mapping of ``sheet_name → markdown_table``.
-    
-    Raises
-    ------
-    ValueError, RuntimeError, RequestException
-        Various errors that might occur during downloading or processing.
-    """
-    import io
-    print(f"  Downloading Excel file from URL: {url}")
-    
-    try:
-        # Add headers conditionally
-        response = requests.get(url, headers=headers if TOKEN != 'default_token_here' else None)
-        response.raise_for_status()
-        
-        # Create a BytesIO buffer from the downloaded content
-        excel_buffer = io.BytesIO(response.content)
-        
-        # For simple Excel files, it's often better to use header=0 directly
-        # Try both approaches: first with automatic header detection, then fallback to header=0
+    for sheet_name in sheet_names:
+        if sheet_filter and sheet_name not in sheet_filter:
+            console.print(f"  Skipping sheet '{sheet_name}' (filtered) from '{source_description}'."); continue
         try:
-            # Let pandas read from the buffer
-            wb = pd.read_excel(excel_buffer, sheet_name=None, header=None)
+            df = pd.read_excel(workbook_data, sheet_name=sheet_name, header=None) if isinstance(workbook_data, pd.ExcelFile) else workbook_data[sheet_name]
+            if isinstance(workbook_data, dict) and (df.columns.name is not None or any(str(c).startswith("Unnamed:") for c in df.columns)):
+                df.columns = range(df.shape[1]); df = df.reset_index(drop=True)
             
-            md_tables: Dict[str, str] = {}
-            
-            for name, df in wb.items():
-                if sheet_filter and name not in sheet_filter:
-                    continue
-                    
-                df = df.iloc[skip_rows:].reset_index(drop=True)
-                try:
-                    # Try to find a header row
-                    header_idx = next(i for i, row in df.iterrows() if row.count() >= min_header_cells)
-                    
-                    # Use ffill instead of deprecated method parameter
-                    header = df.loc[header_idx].copy()
-                    header = header.ffill()  # Forward-fill NaN values
-                    
-                    body = df.loc[header_idx + 1:].copy()
-                    body.columns = header
-                    body.dropna(how="all", inplace=True)
-                    
-                    # Convert to markdown
-                    md_tables[name] = body.to_markdown(index=False)
-                    print(f"  Processed sheet '{name}' with detected header")
-                    
-                except StopIteration:
-                    # No row looked like a header - skip for now, we'll try again with header=0
-                    print(f"  No header detected in sheet '{name}', will try fallback")
-                    continue
+            df_processed = df.iloc[skip_rows:].reset_index(drop=True)
+            header_idx = -1
+            try: header_idx = next(i for i, r in df_processed.iterrows() if r.count() >= min_header_cells)
+            except StopIteration: console.print(f"  [dim]No clear header in '{sheet_name}' of '{source_description}'. Fallback.[/dim]")
 
-            # If no headers were found with our heuristic, try again with header=0
-            if not md_tables:
-                print("  No headers detected with heuristic, trying with fixed header row")
-                excel_buffer.seek(0)  # Reset the buffer position
-                wb = pd.read_excel(excel_buffer, sheet_name=None, header=0)
-                
-                for name, df in wb.items():
-                    if sheet_filter and name not in sheet_filter:
-                        continue
-                        
-                    # Drop rows that are all NaN
-                    df = df.dropna(how="all")
-                    
-                    # Convert to markdown
-                    md_tables[name] = df.to_markdown(index=False)
-                    print(f"  Processed sheet '{name}' with fixed header")
+            if header_idx != -1:
+                header = df_processed.loc[header_idx].copy().ffill()
+                body = df_processed.loc[header_idx + 1:].copy(); body.columns = header; body.dropna(how="all", inplace=True)
+                md_tables[sheet_name] = body.to_markdown(index=False) 
+                console.print(f"  Processed sheet '{sheet_name}' from '{source_description}' (header at {header_idx + skip_rows}).")
+            else:
+                console.print(f"  [dim]Fallback: header=0 for sheet '{sheet_name}' of '{source_description}'.[/dim]")
+                df_header0 = pd.read_excel(workbook_data,sheet_name=sheet_name,header=skip_rows) if isinstance(workbook_data,pd.ExcelFile) else \
+                             (df_processed.iloc[1:].set_axis(df_processed.iloc[0],axis=1,inplace=False) if not df_processed.empty and not df_processed.iloc[0].isnull().all() else pd.DataFrame()) # inplace=False for set_axis
+                df_header0.dropna(how="all", inplace=True)
+                if not df_header0.empty:
+                    md_tables[sheet_name] = df_header0.to_markdown(index=False) 
+                    console.print(f"  Processed sheet '{sheet_name}' from '{source_description}' (fallback, header at {skip_rows}).")
+                else: console.print(f"  [yellow]Warning: Sheet '{sheet_name}' from '{source_description}' empty after fallback.[/yellow]")
+        except Exception as e: console.print(f"[bold red]Error processing sheet '{sheet_name}' from '{source_description}': {e}[/bold red]")
+    if not md_tables: console.print(f"[bold yellow]Warning: No usable data from any sheet in: {source_description}[/bold yellow]")
+    return md_tables
 
-            if not md_tables:
-                raise RuntimeError("Workbook contained no sheets with usable data")
-
-            return md_tables
-            
-        except Exception as e:
-            print(f"Error processing Excel file: {e}")
-            # Last resort: try with the most basic approach
-            excel_buffer.seek(0)  # Reset the buffer position
-            wb = pd.read_excel(excel_buffer, sheet_name=None)
-            md_tables = {name: df.to_markdown(index=False) for name, df in wb.items() 
-                        if not (sheet_filter and name not in sheet_filter)}
-                        
-            if not md_tables:
-                raise RuntimeError(f"Failed to extract any usable data from Excel file: {e}")
-                
-            return md_tables
-        
-    except requests.RequestException as e:
-        print(f"[bold red]Error downloading Excel file from {url}: {e}[/bold red]")
-        raise
-    except Exception as e:
-        print(f"[bold red]Error processing Excel file from {url}: {e}[/bold red]")
-        raise
-
-def process_arxiv_pdf(arxiv_abs_url):
-    """
-    Downloads and extracts text from an ArXiv PDF, wrapped in XML.
-    """
-    pdf_url = arxiv_abs_url.replace("/abs/", "/pdf/") + ".pdf"
-    temp_pdf_path = 'temp_arxiv.pdf'
+def excel_to_markdown(file_path:Union[str,Path],*,skip_rows:int=0,min_header_cells:int=2,sheet_filter:List[str]|None=None)->Dict[str,str]:
+    file_path = Path(file_path).expanduser().resolve(); console = Console()
+    console.print(f"Processing Excel file: {file_path}")
+    if file_path.suffix.lower() not in {".xls",".xlsx"}: raise ValueError("Only .xls/.xlsx supported")
     try:
-        print(f"Downloading ArXiv PDF from {pdf_url}...")
-        response = requests.get(pdf_url)
-        response.raise_for_status()
+        workbook_data = pd.read_excel(file_path, sheet_name=None, header=None)
+        if not workbook_data: raise RuntimeError("Excel file empty or no sheets.")
+        markdown_tables = _convert_excel_sheets_to_markdown(workbook_data, str(file_path), console, skip_rows, min_header_cells, sheet_filter)
+        if not markdown_tables: raise RuntimeError(f"Workbook '{file_path}' no usable data.")
+        return markdown_tables
+    except FileNotFoundError: console.print(f"[bold red]Error: Excel file not found: '{file_path}'.[/bold red]"); raise
+    except Exception as e: console.print(f"[bold red]Error processing local Excel '{file_path}': {e}[/bold red]"); raise RuntimeError(f"Failed Excel '{file_path}': {e}")
 
-        with open(temp_pdf_path, 'wb') as pdf_file:
-            pdf_file.write(response.content)
+def excel_to_markdown_from_url(url:str, headers_to_use: dict, *, skip_rows:int=0,min_header_cells:int=2,sheet_filter:List[str]|None=None)->Dict[str,str]:
+    console = Console(); console.print(f"  Downloading Excel from URL: {url}")
+    try:
+        response = requests.get(url, headers=headers_to_use); response.raise_for_status()
+        excel_buffer = io.BytesIO(response.content)
+        workbook_data = pd.read_excel(excel_buffer, sheet_name=None, header=None)
+        if not workbook_data: raise RuntimeError("Excel from URL empty or no sheets.")
+        markdown_tables = _convert_excel_sheets_to_markdown(workbook_data, url, console, skip_rows, min_header_cells, sheet_filter)
+        if not markdown_tables: raise RuntimeError(f"Workbook from URL '{url}' no usable data.")
+        return markdown_tables
+    except requests.RequestException as e: console.print(f"[bold red]Error downloading Excel {url}: {e}[/bold red]"); raise
+    except Exception as e: console.print(f"[bold red]Error processing Excel from URL '{url}': {e}[/bold red]"); raise RuntimeError(f"Failed Excel from URL '{url}': {e}")
 
-        print("Extracting text from PDF...")
-        text_list = []
-        with open(temp_pdf_path, 'rb') as pdf_file:
-            pdf_reader = PdfReader(pdf_file)
-            for i, page in enumerate(range(len(pdf_reader.pages))):
-                print(f"  Processing page {i+1}/{len(pdf_reader.pages)}")
-                page_text = pdf_reader.pages[page].extract_text()
-                if page_text: # Add text only if extraction was successful
-                    text_list.append(page_text)
-
-        # Use XML structure
-        formatted_text = f'<source type="arxiv" url="{escape_xml(arxiv_abs_url)}">\n'
-        formatted_text += ' '.join(text_list) # Append raw extracted text
-        formatted_text += '\n</source>' # Close source tag
-        print("ArXiv paper processed successfully.")
-        return formatted_text
-
+def process_arxiv_pdf(arxiv_abs_url): # Uses requests.get directly without headers
+    pdf_url = arxiv_abs_url.replace("/abs/", "/pdf/") + ".pdf"; temp_pdf_path = 'temp_arxiv.pdf'; console = Console() 
+    try:
+        console.print(f"Downloading ArXiv PDF from {pdf_url}...")
+        response = requests.get(pdf_url); response.raise_for_status() # No headers passed here
+        with open(temp_pdf_path, 'wb') as pdf_file: pdf_file.write(response.content)
+        console.print("Extracting text from PDF...")
+        with open(temp_pdf_path, 'rb') as pdf_file_obj:
+            pdf_reader = PdfReader(pdf_file_obj)
+            extracted_text_or_error = _extract_text_from_pdf_object(pdf_reader, arxiv_abs_url, console)
+        content_to_insert = extracted_text_or_error if extracted_text_or_error.strip().startswith("<e>") else escape_xml(extracted_text_or_error)
+        formatted_output = f'<source type="arxiv" url="{escape_xml(arxiv_abs_url)}">\n{content_to_insert}\n</source>'
+        if "<e>" not in extracted_text_or_error: console.print("ArXiv paper processed successfully.")
+        return formatted_output
     except requests.RequestException as e:
-        print(f"[bold red]Error downloading ArXiv PDF {pdf_url}: {e}[/bold red]")
+        console.print(f"[bold red]Error downloading ArXiv PDF {pdf_url}: {e}[/bold red]")
         return f'<source type="arxiv" url="{escape_xml(arxiv_abs_url)}"><error>Failed to download PDF: {escape_xml(str(e))}</error></source>'
-    except Exception as e: # Catch PdfReader errors or others
-        print(f"[bold red]Error processing ArXiv PDF {arxiv_abs_url}: {e}[/bold red]")
+    except Exception as e: 
+        console.print(f"[bold red]Error processing ArXiv PDF {arxiv_abs_url}: {e}[/bold red]")
         return f'<source type="arxiv" url="{escape_xml(arxiv_abs_url)}"><error>Failed to process PDF: {escape_xml(str(e))}</error></source>'
     finally:
-        if os.path.exists(temp_pdf_path):
-            os.remove(temp_pdf_path)
+        if os.path.exists(temp_pdf_path): os.remove(temp_pdf_path)
 
-
-def fetch_youtube_transcript(url):
-    """
-    Fetches YouTube transcript using youtube_transcript_api, wrapped in XML.
-    """
+def fetch_youtube_transcript(url): # Does not use headers
     def extract_video_id(url):
         pattern = r'(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:[^\/\n\s]+\/\S+\/|(?:v|e(?:mbed)?)\/|\S*?[?&]v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})'
-        match = re.search(pattern, url)
-        return match.group(1) if match else None
-
+        match = re.search(pattern, url); return match.group(1) if match else None
     video_id = extract_video_id(url)
     if not video_id:
-        print(f"[bold red]Could not extract YouTube video ID from URL: {url}[/bold red]")
-        # Use XML for errors
-        return f'<source type="youtube_transcript" url="{escape_xml(url)}">\n<error>Could not extract video ID from URL.</error>\n</source>'
-
+        print(f"[bold red]Could not extract YouTube video ID from: {url}[/bold red]")
+        return f'<source type="youtube_transcript" url="{escape_xml(url)}">\n<error>Could not extract video ID.</error>\n</source>'
     try:
         print(f"Fetching transcript for YouTube video ID: {video_id}")
-        transcript_list = YouTubeTranscriptApi.get_transcript(video_id)
-        formatter = TextFormatter()
-        transcript = formatter.format_transcript(transcript_list)
+        transcript = YouTubeTranscriptApi.get_transcript(video_id)
+        formatter = TextFormatter(); formatted_transcript = formatter.format_transcript(transcript) 
         print("Transcript fetched successfully.")
-
-        # Use XML structure for success
-        formatted_text = f'<source type="youtube_transcript" url="{escape_xml(url)}">\n'
-        formatted_text += transcript # Append raw transcript text
-        formatted_text += '\n</source>' # Close source tag
-        return formatted_text
+        return f'<source type="youtube_transcript" url="{escape_xml(url)}">\n{escape_xml(formatted_transcript)}\n</source>' 
     except Exception as e:
         print(f"[bold red]Error fetching YouTube transcript for {url}: {e}[/bold red]")
-        # Use XML structure for errors
         return f'<source type="youtube_transcript" url="{escape_xml(url)}">\n<error>{escape_xml(str(e))}</error>\n</source>'
 
-def preprocess_text(input_file, output_file):
+def preprocess_text(input_file: str, output_file: str):
     """
-    Preprocesses text, optionally removing stopwords if NLTK is enabled.
-    Handles potential XML structure if present (intended for compressed output).
+    Processes text from an input XML file for compression.
+    It attempts to parse the input file as XML. If successful, it iterates
+    through all elements, extracts their text content, processes this text
+    (lowercasing, regex substitutions, optional stopword removal), and
+    concatenates all processed text pieces with newlines.
+    If XML parsing fails, it falls back to processing the entire file content
+    as a single block of plain text.
+    The processed plain text is then written to the output file.
     """
     print("Preprocessing text for compression (if enabled)...")
-    with open(input_file, "r", encoding="utf-8") as infile:
-        input_text = infile.read()
+    try:
+        with open(input_file, "r", encoding="utf-8") as infile:
+            input_text = infile.read()
+    except Exception as e:
+        print(f"[bold red]Error reading input file {input_file}: {e}[/bold red]")
+        return # Cannot proceed if input file cannot be read
 
-    def process_content(text):
-        text = re.sub(r"[\n\r]+", "\n", text)
-        text = re.sub(r"[^a-zA-Z0-9\s_.,!?:;@#$%^&*()+\-=[\]{}|\\<>`~'\"/]+", "", text)
-        text = re.sub(r"\s+", " ", text)
-        text = text.lower()
+    # This helper function remains unchanged as per requirements
+    def process_content(text_content: str) -> str:
+        text_content = re.sub(r"[\n\r]+", "\n", text_content) # Normalize newlines
+        # The following regex is aggressive and might be revisited later.
+        # It strips characters not in the allowed set.
+        text_content = re.sub(r"[^a-zA-Z0-9\s_.,!?:;@#$%^&*()+\-=[\]{}|\\<>`~'\"/]+", "", text_content)
+        text_content = re.sub(r"\s+", " ", text_content) # Normalize whitespace
+        text_content = text_content.lower()
         if ENABLE_COMPRESSION_AND_NLTK and stop_words:
-            words = text.split()
+            words = text_content.split()
             words = [word for word in words if word not in stop_words]
-            text = " ".join(words)
-        return text
+            text_content = " ".join(words)
+        return text_content
+
+    final_processed_text = ""
+    try:
+        # Attempt to parse as XML
+        root = ET.fromstring(input_text)
+        processed_texts = []
+        for elem in root.iter():
+            if elem.text and elem.text.strip(): # Ensure text exists and is not just whitespace
+                cleaned_text = process_content(elem.text)
+                processed_texts.append(cleaned_text)
+        final_processed_text = "\n".join(processed_texts)
+        print("Text preprocessing with XML parsing completed.")
+    except ET.ParseError:
+        # Fallback: process as plain text if input is not valid XML
+        print("[yellow]Warning: Input for preprocessing was not valid XML. Processing as plain text.[/yellow]")
+        final_processed_text = process_content(input_text)
+    except Exception as e:
+        # Catch any other unexpected errors during the try block (e.g., within process_content)
+        print(f"[bold red]Error during text preprocessing: {e}[/bold red]")
+        print("[bold yellow]Warning:[/bold yellow] Preprocessing failed, writing original content to compressed file as a fallback.")
+        # Fallback to writing the original input if processing fails catastrophically
+        final_processed_text = input_text 
 
     try:
-        # Attempt to parse as XML - this is mainly relevant if the INPUT
-        # already had some structure we wanted to preserve during compression
-        root = ET.fromstring(input_text)
-        for elem in root.iter():
-            if elem.text:
-                elem.text = process_content(elem.text)
-            if elem.tail:
-                elem.tail = process_content(elem.tail)
-        tree = ET.ElementTree(root)
-        tree.write(output_file, encoding="utf-8", xml_declaration=True)
-        print("Text preprocessing with XML structure preservation completed.")
-    except ET.ParseError:
-        # If input is not valid XML (likely our case with raw content), process as plain text
-        processed_text = process_content(input_text)
         with open(output_file, "w", encoding="utf-8") as out_file:
-            out_file.write(processed_text)
-        print("Input was not XML. Text preprocessing completed as plain text.")
+            out_file.write(final_processed_text)
+        print(f"Processed text written to {output_file}")
     except Exception as e:
-        print(f"[bold red]Error during text preprocessing: {e}[/bold red]")
-        # Fallback: write the original text if preprocessing fails
-        with open(output_file, "w", encoding="utf-8") as out_file:
-             out_file.write(input_text)
-        print("[bold yellow]Warning:[/bold yellow] Preprocessing failed, writing original content to compressed file.")
+        print(f"[bold red]Error writing processed text to {output_file}: {e}[/bold red]")
 
 
 def is_potential_alias(arg_string):
-    """Checks if an argument string looks like a potential alias name."""
-    if not arg_string:
-        return False
-    # An alias should not contain typical path or URL characters
-    return not any(char in arg_string for char in ['.', '/', ':', '\\'])
+    return bool(arg_string) and not any(c in arg_string for c in ['.', '/', ':', '\\'])
 
 def handle_add_alias(args, console):
-    """Handles the --add-alias command."""
     ensure_alias_dir_exists()
-    if len(args) < 2: # Need at least '--add-alias', 'alias_name', 'target'
-        console.print("[bold red]Error:[/bold red] --add-alias requires an alias name and at least one target URL/path.")
-        console.print("Usage: python onefilellm.py --add-alias <alias_name> <url_or_path1> [url_or_path2 ...]")
-        return True # Indicate handled and should exit
+    alias_name = ""
+    targets = []
+    if '--add-alias' in args: 
+        alias_name_idx = args.index("--add-alias") + 1
+        if alias_name_idx < len(args): alias_name = args[alias_name_idx]
+        else: console.print("[bold red]Error: Alias name not provided after --add-alias.[/bold red]"); return True
+        targets = args[alias_name_idx+1:]
+    else: 
+        console.print("[bold red]Error: --add-alias flag not found correctly in handle_add_alias.[/bold red]"); return True
 
-    alias_name_index = args.index("--add-alias") + 1
-    if alias_name_index >= len(args):
-         console.print("[bold red]Error:[/bold red] Alias name not provided after --add-alias.")
-         return True
 
-    alias_name = args[alias_name_index]
-    
-    # Basic validation for alias name (no path-like chars)
-    if '/' in alias_name or '\\' in alias_name or '.' in alias_name or ':' in alias_name:
-        console.print(f"[bold red]Error:[/bold red] Invalid alias name '{alias_name}'. Avoid using '/', '\\', '.', or ':'.")
-        return True
-
-    targets = args[alias_name_index + 1:]
-
-    if not targets:
-        console.print("[bold red]Error:[/bold red] No target URLs/paths provided for the alias.")
-        return True
-
-    alias_file_path = ALIAS_DIR / alias_name
+    if any(c in alias_name for c in ['/', '\\', '.', ':']): console.print(f"[bold red]Error: Invalid alias name '{alias_name}'.[/bold red]"); return True
+    if not targets: console.print("[bold red]Error: No targets for alias.[/bold red]"); return True
     try:
-        with open(alias_file_path, "w", encoding="utf-8") as f:
-            for target in targets:
-                f.write(target + "\n")
-        console.print(f"[green]Alias '{alias_name}' created/updated successfully.[/green]")
-        for i, target in enumerate(targets):
-            console.print(f"  {i+1}. {target}")
-    except IOError as e:
-        console.print(f"[bold red]Error creating alias file {alias_file_path}: {e}[/bold red]")
-    return True # Indicate handled and should exit
+        with open(ALIAS_DIR / alias_name, "w", encoding="utf-8") as f:
+            for target in targets: f.write(target + "\n") 
+        console.print(f"[green]Alias '{alias_name}' created/updated for: {', '.join(targets)}[/green]")
+    except IOError as e: console.print(f"[bold red]Error creating alias file: {e}[/bold red]")
+    return True
 
 def handle_alias_from_clipboard(args, console):
-    """Handles the --alias-from-clipboard command."""
     ensure_alias_dir_exists()
-    
-    if len(args) < 2: # Need at least '--alias-from-clipboard', 'alias_name'
-        console.print("[bold red]Error:[/bold red] --alias-from-clipboard requires an alias name.")
-        console.print("Usage: python onefilellm.py --alias-from-clipboard <alias_name>")
-        return True
+    alias_name = ""
+    if '--alias-from-clipboard' in args :
+        alias_name_idx = args.index("--alias-from-clipboard") + 1
+        if alias_name_idx < len(args): alias_name = args[alias_name_idx]
+        else: console.print("[bold red]Error: Alias name not provided after --alias-from-clipboard.[/bold red]"); return True
+    else: 
+        console.print("[bold red]Error: --alias-from-clipboard flag not found correctly.[/bold red]"); return True
 
-    alias_name_index = args.index("--alias-from-clipboard") + 1
-    if alias_name_index >= len(args):
-         console.print("[bold red]Error:[/bold red] Alias name not provided after --alias-from-clipboard.")
-         return True
-
-    alias_name = args[alias_name_index]
-
-    if '/' in alias_name or '\\' in alias_name or '.' in alias_name or ':' in alias_name:
-        console.print(f"[bold red]Error:[/bold red] Invalid alias name '{alias_name}'. Avoid using '/', '\\', '.', or ':'.")
-        return True
-
+    if any(c in alias_name for c in ['/', '\\', '.', ':']): console.print(f"[bold red]Error: Invalid alias name '{alias_name}'.[/bold red]"); return True
     try:
         clipboard_content = pyperclip.paste()
-        if not clipboard_content or not clipboard_content.strip():
-            console.print("[bold yellow]Warning:[/bold yellow] Clipboard is empty. Alias not created.")
-            return True
-        
-        # Treat each line in clipboard as a separate target
-        targets = [line.strip() for line in clipboard_content.splitlines() if line.strip()]
-
-        if not targets:
-            console.print("[bold yellow]Warning:[/bold yellow] Clipboard content did not yield any valid targets (after stripping whitespace). Alias not created.")
-            return True
-
-        alias_file_path = ALIAS_DIR / alias_name
-        with open(alias_file_path, "w", encoding="utf-8") as f:
-            for target in targets:
-                f.write(target + "\n")
-        console.print(f"[green]Alias '{alias_name}' created/updated successfully from clipboard content:[/green]")
-        for i, target in enumerate(targets):
-            console.print(f"  {i+1}. {target}")
-    except pyperclip.PyperclipException as e:
-        console.print(f"[bold red]Error accessing clipboard: {e}[/bold red]")
-        console.print("Please ensure you have a copy/paste mechanism installed (e.g., xclip or xsel on Linux).")
-    except IOError as e:
-        console.print(f"[bold red]Error creating alias file {alias_file_path}: {e}[/bold red]")
-    return True # Indicate handled and should exit
+        if not clipboard_content or not clipboard_content.strip(): console.print("[yellow]Clipboard empty. Alias not created.[/yellow]"); return True
+        targets = [line.strip() for line in clipboard_content.splitlines() if line.strip()] 
+        if not targets: console.print("[yellow]No valid targets from clipboard. Alias not created.[/yellow]"); return True
+        with open(ALIAS_DIR / alias_name, "w", encoding="utf-8") as f:
+            for target in targets: f.write(target + "\n")
+        console.print(f"[green]Alias '{alias_name}' created/updated from clipboard: {', '.join(targets)}[/green]")
+    except Exception as e: console.print(f"[bold red]Error with clipboard/alias file: {e}[/bold red]")
+    return True
 
 def load_alias(alias_name, console):
-    """Loads target paths from an alias file."""
-    ensure_alias_dir_exists() # Ensure directory is checked, though mostly for creation
-    alias_file_path = ALIAS_DIR / alias_name
-    if alias_file_path.is_file():
+    ensure_alias_dir_exists()
+    alias_file = ALIAS_DIR / alias_name
+    if alias_file.is_file():
         try:
-            with open(alias_file_path, "r", encoding="utf-8") as f:
-                targets = [line.strip() for line in f if line.strip()]
-            if not targets:
-                console.print(f"[yellow]Warning: Alias '{alias_name}' file is empty.[/yellow]")
-                return []
+            with open(alias_file, "r", encoding="utf-8") as f: targets = [l.strip() for l in f if l.strip()]
+            if not targets: console.print(f"[yellow]Warning: Alias '{alias_name}' is empty.[/yellow]"); return []
             return targets
-        except IOError as e:
-            console.print(f"[bold red]Error reading alias file {alias_file_path}: {e}[/bold red]")
-            return None # Indicate error
-    return None # Alias not found
+        except IOError as e: console.print(f"[bold red]Error reading alias {alias_file}: {e}[/bold red]"); return None
+    return None
 
 def resolve_single_input_source(source_string, console):
-    """
-    Resolves a single input string. If it's an alias, expands it.
-    Otherwise, returns the string as a single-item list.
-    Returns a list of actual source strings, or an empty list if an alias is empty or fails to load.
-    """
-    resolved_sources = []
     if is_potential_alias(source_string):
-        # The following lines are more aligned with existing logging in main() for CLI args
-        # so we adapt the logging slightly to match.
-        existing_log_message = f"[dim]Checking if '{source_string}' is an alias...[/dim]"
-        if console: # Check if console object is passed (it might not be in all call contexts)
-            console.print(existing_log_message)
-        else:
-            print(existing_log_message) # Fallback to standard print
-
-        resolved_targets = load_alias(source_string, console)
-        if resolved_targets is not None:  # Alias found and loaded (could be empty list)
-            resolved_sources.extend(resolved_targets)
-            if resolved_targets:
-                success_message = f"[cyan]Alias '{source_string}' expanded to: {', '.join(resolved_targets)}[/cyan]"
-                if console:
-                    console.print(success_message)
-                else:
-                    print(success_message)
-            else:
-                empty_alias_message = f"[yellow]Alias '{source_string}' is defined but empty. Skipping.[/yellow]"
-                if console:
-                    console.print(empty_alias_message)
-                else:
-                    print(empty_alias_message)
-        else:  # Not found as an alias or error reading it
-            not_found_message = f"[dim]'{source_string}' is not a known alias or could not be read. Treating as a direct input.[/dim]"
-            if console:
-                console.print(not_found_message)
-            else:
-                print(not_found_message)
-            resolved_sources.append(source_string)
-    else:
-        resolved_sources.append(source_string)
-    return resolved_sources
+        console.print(f"[dim]Checking if '{source_string}' is an alias...[/dim]")
+        resolved = load_alias(source_string, console)
+        if resolved is not None:
+            if resolved: console.print(f"[cyan]Alias '{source_string}' expanded to: {', '.join(resolved)}[/cyan]")
+            else: console.print(f"[yellow]Alias '{source_string}' is empty. Skipping.[/yellow]")
+            return resolved
+        else: 
+            console.print(f"[dim]'{source_string}' not a known alias or error reading. Treating as direct input.[/dim]")
+            return [source_string]
+    return [source_string]
 
 def get_token_count(text, disallowed_special=[], chunk_size=1000):
-    """
-    Counts tokens using tiktoken, stripping XML tags first.
-    """
     enc = tiktoken.get_encoding("cl100k_base")
-
-    # Restore XML tag removal before counting tokens
-    # This gives a count of the actual content, not the structural tags
-    text_without_tags = re.sub(r'<[^>]+>', '', text)
-
-    # Split the text without tags into smaller chunks for more robust encoding
-    chunks = [text_without_tags[i:i+chunk_size] for i in range(0, len(text_without_tags), chunk_size)]
-    total_tokens = 0
-
+    text_no_tags = re.sub(r'<[^>]+>', '', text) 
+    chunks = [text_no_tags[i:i+chunk_size] for i in range(0,len(text_no_tags),chunk_size)]; total_tokens=0
     for chunk in chunks:
-        try:
-            tokens = enc.encode(chunk, disallowed_special=disallowed_special)
-            total_tokens += len(tokens)
-        except Exception as e:
-            print(f"[bold yellow]Warning:[/bold yellow] Error encoding chunk for token count: {e}")
-            # Estimate token count for problematic chunk (e.g., len/4)
-            total_tokens += len(chunk) // 4
-
+        try: total_tokens += len(enc.encode(chunk, disallowed_special=disallowed_special))
+        except Exception as e: print(f"[yellow]Warning: Error encoding chunk for token count: {e}[/yellow]"); total_tokens += len(chunk)//4
     return total_tokens
 
+def is_same_domain(base, new): return urlparse(base).netloc == urlparse(new).netloc
+def is_within_depth(base, current, max_depth):
+    base_p = urlparse(base).path.rstrip('/'); current_p = urlparse(current).path.rstrip('/')
+    if not current_p.startswith(base_p): return False
+    return (len(current_p.split('/')) if current_p else 0) - (len(base_p.split('/')) if base_p else 0) <= max_depth
 
-def is_same_domain(base_url, new_url):
-    return urlparse(base_url).netloc == urlparse(new_url).netloc
-
-def is_within_depth(base_url, current_url, max_depth):
-    # Simple path depth check
-    base_path = urlparse(base_url).path.rstrip('/')
-    current_path = urlparse(current_url).path.rstrip('/')
-    # Ensure current path starts with base path
-    if not current_path.startswith(base_path):
-        return False
-    base_depth = len(base_path.split('/')) if base_path else 0
-    current_depth = len(current_path.split('/')) if current_path else 0
-    return (current_depth - base_depth) <= max_depth
-
-
-def process_web_pdf(url):
-    """Downloads and extracts text from a PDF found during web crawl."""
+def process_web_pdf(url: str) -> str | None: 
     temp_pdf_path = 'temp_web.pdf'
+    console = Console() 
     try:
-        print(f"  Downloading PDF: {url}")
-        response = requests.get(url, timeout=30) # Add timeout
-        response.raise_for_status()
-
-        # Basic check for PDF content type
+        console.print(f"  Downloading PDF: {url}")
+        response = requests.get(url, timeout=30); response.raise_for_status()
         if 'application/pdf' not in response.headers.get('Content-Type', '').lower():
-             print(f"  [bold yellow]Warning:[/bold yellow] URL doesn't report as PDF, skipping: {url}")
-             return None # Or return an error string
-
-        with open(temp_pdf_path, 'wb') as pdf_file:
-            pdf_file.write(response.content)
-
-        print(f"  Extracting text from PDF: {url}")
-        text_list = []
-        with open(temp_pdf_path, 'rb') as pdf_file:
-            pdf_reader = PdfReader(pdf_file)
-            for page in range(len(pdf_reader.pages)):
-                page_text = pdf_reader.pages[page].extract_text()
-                if page_text:
-                    text_list.append(page_text)
-        return ' '.join(text_list)
+            console.print(f"  [bold yellow]Warning:[/bold yellow] URL doesn't report as PDF, skipping: {url}")
+            return "<error>Skipped non-PDF content reported at PDF URL.</error>" 
+        with open(temp_pdf_path, 'wb') as pdf_file: pdf_file.write(response.content)
+        console.print(f"  Extracting text from PDF: {url}")
+        with open(temp_pdf_path, 'rb') as pdf_file_obj:
+            pdf_reader = PdfReader(pdf_file_obj)
+            return _extract_text_from_pdf_object(pdf_reader, url, console) 
     except requests.RequestException as e:
-        print(f"  [bold red]Error downloading PDF {url}: {e}[/bold red]")
-        return f"<error>Failed to download PDF: {escape_xml(str(e))}</error>"
-    except Exception as e:
-        print(f"  [bold red]Error processing PDF {url}: {e}[/bold red]")
-        return f"<error>Failed to process PDF: {escape_xml(str(e))}</error>"
+        console.print(f"  [bold red]Error downloading PDF {url}: {e}[/bold red]")
+        return f"<error>Failed to download PDF: {escape_xml(str(e))}</error>" 
+    except Exception as e: 
+        console.print(f"  [bold red]Error processing PDF {url}: {e}[/bold red]")
+        return f"<error>Failed to process PDF: {escape_xml(str(e))}</error>" 
     finally:
-        if os.path.exists(temp_pdf_path):
-            os.remove(temp_pdf_path)
+        if os.path.exists(temp_pdf_path): os.remove(temp_pdf_path)
 
+def crawl_and_extract_text(base_url, max_depth, include_pdfs, ignore_epubs, headers_to_use: dict = None): 
+    if headers_to_use is None: headers_to_use = {} 
 
-def crawl_and_extract_text(base_url, max_depth, include_pdfs, ignore_epubs):
-    """
-    Crawls a website starting from base_url, extracts text, and wraps in XML.
-    """
-    visited_urls = set()
-    urls_to_visit = [(base_url, 0)]
-    processed_urls_content = {} # Store URL -> content/error
-    # Start XML structure
-    all_text = [f'<source type="web_crawl" base_url="{escape_xml(base_url)}">']
-
-    print(f"Starting crawl from: {base_url} (Max Depth: {max_depth}, Include PDFs: {include_pdfs})")
-
-    while urls_to_visit:
-        current_url, current_depth = urls_to_visit.pop(0)
-        # Normalize URL: remove fragment and ensure scheme
-        parsed_url = urlparse(current_url)
-        clean_url = urlparse(current_url)._replace(fragment="").geturl()
-        if not parsed_url.scheme:
-             clean_url = "http://" + clean_url # Default to http if missing
-
-        if clean_url in visited_urls:
-            continue
-
-        # Check domain and depth *after* cleaning URL
-        if not is_same_domain(base_url, clean_url) or not is_within_depth(base_url, clean_url, max_depth):
-             # print(f"Skipping (domain/depth): {clean_url}") # Optional debug
-             continue
-
-        if ignore_epubs and clean_url.lower().endswith('.epub'):
-            print(f"Skipping (EPUB): {clean_url}")
-            visited_urls.add(clean_url)
-            continue
-
-        print(f"Processing (Depth {current_depth}): {clean_url}")
-        visited_urls.add(clean_url)
-        page_content = f'\n<page url="{escape_xml(clean_url)}">' # Start page tag
-
+    visited, to_visit, processed_content = set(), [(base_url,0)], {}
+    all_text_xml = [f'<source type="web_crawl" base_url="{escape_xml(base_url)}">'] 
+    print(f"Crawling: {base_url} (Depth: {max_depth}, PDFs: {include_pdfs})")
+    while to_visit:
+        curr_url, depth = to_visit.pop(0)
+        parsed = urlparse(curr_url); clean_url = parsed._replace(fragment="").geturl()
+        if not parsed.scheme: clean_url = "http://" + clean_url
+        if clean_url in visited or not is_same_domain(base_url,clean_url) or not is_within_depth(base_url,clean_url,max_depth): continue
+        if ignore_epubs and clean_url.lower().endswith('.epub'): print(f"Skipping EPUB: {clean_url}"); visited.add(clean_url); continue
+        print(f"Processing (Depth {depth}): {clean_url}"); visited.add(clean_url)
+        page_content_xml_inner = f'\n<page url="{escape_xml(clean_url)}">' 
         try:
-            # Handle PDFs separately
             if clean_url.lower().endswith('.pdf'):
                 if include_pdfs:
-                    pdf_text = process_web_pdf(clean_url)
-                    if pdf_text: # Append text or error message from process_web_pdf
-                        page_content += f'\n{pdf_text}\n'
-                    else: # process_web_pdf returned None (e.g., wrong content type)
-                        page_content += '\n<error>Skipped non-PDF content reported at PDF URL.</error>\n'
-                else:
-                    print(f"  Skipping PDF (include_pdfs=False): {clean_url}")
-                    page_content += '\n<skipped>PDF ignored by configuration</skipped>\n'
-
-            # Handle HTML pages
+                    pdf_text_or_error = process_web_pdf(clean_url) 
+                    content_to_add = pdf_text_or_error if (pdf_text_or_error and pdf_text_or_error.strip().startswith("<e>")) else escape_xml(pdf_text_or_error or "")
+                    page_content_xml_inner += f'\n{content_to_add}\n'
+                else: page_content_xml_inner += '\n<skipped>PDF ignored by config</skipped>\n'
             else:
-                 # Add timeout to requests
-                response = requests.get(clean_url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=30)
-                response.raise_for_status()
-
-                # Basic check for HTML content type
-                if 'text/html' not in response.headers.get('Content-Type', '').lower():
-                    print(f"  [bold yellow]Warning:[/bold yellow] Skipping non-HTML page: {clean_url} (Content-Type: {response.headers.get('Content-Type')})")
-                    page_content += f'\n<skipped>Non-HTML content type: {escape_xml(response.headers.get("Content-Type", "N/A"))}</skipped>\n'
+                response = requests.get(clean_url, headers={'User-Agent':'Mozilla/5.0'}, timeout=30); response.raise_for_status()
+                if 'text/html' not in response.headers.get('Content-Type','').lower():
+                    page_content_xml_inner += f'\n<skipped>Non-HTML: {escape_xml(response.headers.get("Content-Type","N/A"))}</skipped>\n'
                 else:
                     soup = BeautifulSoup(response.content, 'html.parser')
-                    # Remove scripts, styles, etc.
-                    for element in soup(['script', 'style', 'head', 'title', 'meta', '[document]', 'nav', 'footer', 'aside']): # Added common noise tags
-                        element.decompose()
-                    comments = soup.find_all(string=lambda text: isinstance(text, Comment))
-                    for comment in comments:
-                        comment.extract()
-                    # Get text, try to preserve some structure with newlines
-                    text = soup.get_text(separator='\n', strip=True)
-                    page_content += f'\n{text}\n' # Append raw extracted text
-
-                    # Find links for the next level if depth allows
-                    if current_depth < max_depth:
+                    for el in soup(['script','style','head','title','meta','[document]','nav','footer','aside']): el.decompose()
+                    for comment in soup.find_all(string=lambda t: isinstance(t,Comment)): comment.extract()
+                    text_raw = soup.get_text(separator='\n', strip=True)
+                    page_content_xml_inner += f'\n{escape_xml(text_raw)}\n' 
+                    if depth < max_depth:
                         for link in soup.find_all('a', href=True):
                             try:
-                                new_url_raw = link['href']
-                                if new_url_raw and not new_url_raw.startswith(('mailto:', 'javascript:', '#')):
-                                    new_url = urljoin(clean_url, new_url_raw)
+                                new_raw = link['href']
+                                if new_raw and not new_raw.startswith(('mailto:','javascript:','#')):
+                                    new_url = urljoin(clean_url, new_raw)
                                     parsed_new = urlparse(new_url)
-                                    # Add scheme if missing for domain/depth checks
-                                    if not parsed_new.scheme:
-                                         new_url = parsed_new._replace(scheme=urlparse(clean_url).scheme).geturl()
-
-                                    new_clean_url = urlparse(new_url)._replace(fragment="").geturl()
-
-                                    if new_clean_url not in visited_urls:
-                                        # Check domain/depth *before* adding to queue
-                                        if is_same_domain(base_url, new_clean_url) and is_within_depth(base_url, new_clean_url, max_depth):
-                                             if not (ignore_epubs and new_clean_url.lower().endswith('.epub')):
-                                                # Add only if valid and not already visited
-                                                if (new_clean_url, current_depth + 1) not in urls_to_visit:
-                                                     urls_to_visit.append((new_clean_url, current_depth + 1))
-                            except Exception as link_err: # Catch errors parsing individual links
-                                print(f"  [bold yellow]Warning:[/bold yellow] Error parsing link '{link.get('href')}': {link_err}")
+                                    if not parsed_new.scheme: new_url = parsed_new._replace(scheme=urlparse(clean_url).scheme).geturl()
+                                    new_clean = urlparse(new_url)._replace(fragment="").geturl()
+                                    if new_clean not in visited and is_same_domain(base_url,new_clean) and is_within_depth(base_url,new_clean,max_depth) and not (ignore_epubs and new_clean.lower().endswith('.epub')):
+                                        if (new_clean, depth+1) not in to_visit: to_visit.append((new_clean, depth+1))
+                            except Exception as le: print(f"  [yellow]Link parse error '{link.get('href')}': {le}[/yellow]")
+        except Exception as e: page_content_xml_inner += f'\n<error>Failed to process page: {escape_xml(str(e))}</error>\n'
+        page_content_xml_inner += '</page>'; all_text_xml.append(page_content_xml_inner); processed_content[clean_url]=page_content_xml_inner
+    all_text_xml.append('\n</source>'); print("Crawl finished.")
+    return {'content': '\n'.join(all_text_xml), 'processed_urls': list(processed_content.keys())}
 
 
-        except requests.exceptions.Timeout:
-             print(f"[bold red]Timeout retrieving {clean_url}[/bold red]")
-             page_content += f'\n<error>Timeout during request</error>\n'
-        except requests.RequestException as e:
-            print(f"[bold red]Failed to retrieve {clean_url}: {e}[/bold red]")
-            page_content += f'\n<error>Failed to retrieve URL: {escape_xml(str(e))}</error>\n'
-        except Exception as e: # Catch other errors like BeautifulSoup issues
-             print(f"[bold red]Error processing page {clean_url}: {e}[/bold red]")
-             page_content += f'\n<error>Error processing page: {escape_xml(str(e))}</error>\n'
+def process_doi_or_pmid(identifier): 
+    sci_hub_domains = ['https://sci-hub.se/', 'https://sci-hub.st/', 'https://sci-hub.ru/'] 
+    pdf_filename = f"temp_doi_{identifier.replace('/', '-')}.pdf"
+    pdf_text_content_raw = None 
+    console = Console() 
+    sci_hub_req_headers = {'User-Agent': 'Mozilla/5.0', 'Accept': 'text/html'}
 
-        page_content += '</page>' # Close page tag
-        all_text.append(page_content)
-        processed_urls_content[clean_url] = page_content # Store for processed list
-
-
-    all_text.append('\n</source>') # Close source tag
-    print("Web crawl finished.")
-    formatted_content = '\n'.join(all_text)
-
-    return {
-        'content': formatted_content,
-        'processed_urls': list(processed_urls_content.keys()) # Return URLs we attempted to process
-    }
-
-
-def process_doi_or_pmid(identifier):
-    """
-    Attempts to fetch a paper PDF via Sci-Hub using DOI or PMID, wrapped in XML.
-    Note: Sci-Hub access can be unreliable.
-    """
-    # Use a more reliable Sci-Hub domain if known, otherwise fallback
-    sci_hub_domains = ['https://sci-hub.se/', 'https://sci-hub.st/', 'https://sci-hub.ru/'] # Add more mirrors if needed
-    pdf_filename = f"temp_{identifier.replace('/', '-')}.pdf"
-    pdf_text = None
-
-    for base_url in sci_hub_domains:
-        print(f"Attempting Sci-Hub domain: {base_url} for identifier: {identifier}")
-        headers = { # Headers might help avoid blocks
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.102 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Connection': 'keep-alive',
-        }
-        payload = {'request': identifier}
-
+    for domain in sci_hub_domains:
+        console.print(f"Attempting Sci-Hub domain: {domain} for identifier: {identifier}")
         try:
-            # Initial request to Sci-Hub page
-            response = requests.post(base_url, headers=headers, data=payload, timeout=60)
+            response = requests.post(domain, headers=sci_hub_req_headers, data={'request': identifier}, timeout=60)
             response.raise_for_status()
             soup = BeautifulSoup(response.content, 'html.parser')
+            pdf_url_on_page = None
+            iframe = soup.find('iframe', id='pdf')
+            if iframe and iframe.get('src'): pdf_url_on_page = urljoin(domain, iframe['src'])
+            else: 
+                links = soup.find_all('a', href=lambda h: h and ('.pdf' in h or 'download=true' in h))
+                if links: pdf_url_on_page = urljoin(domain, links[0]['href']) 
 
-            # Find the PDF link/embed (Sci-Hub structure varies)
-            pdf_url = None
-            # Try common patterns: iframe#pdf, button onclick location.href, direct links
-            pdf_frame = soup.find('iframe', id='pdf')
-            if pdf_frame and pdf_frame.get('src'):
-                pdf_url = urljoin(base_url, pdf_frame['src'])
-            else:
-                # Look for buttons or links directing to the PDF
-                pdf_button = soup.find('button', onclick=lambda x: x and 'location.href=' in x)
-                if pdf_button:
-                    match = re.search(r"location\.href='(//.*?)'", pdf_button['onclick'])
-                    if match:
-                         # Need to add scheme if missing (often //...)
-                        pdf_url_part = match.group(1)
-                        if pdf_url_part.startswith("//"):
-                            pdf_url = "https:" + pdf_url_part
-                        else:
-                             pdf_url = urljoin(base_url, pdf_url_part)
-
-            if not pdf_url:
-                 print(f"  Could not find PDF link on page from {base_url}")
-                 continue # Try next domain
-
-            print(f"  Found potential PDF URL: {pdf_url}")
-            # Ensure URL has scheme for requests
-            if pdf_url.startswith("//"):
-                pdf_url = "https:" + pdf_url
-            elif not pdf_url.startswith("http"):
-                 pdf_url = urljoin(base_url, pdf_url)
-
-
-            print(f"  Downloading PDF from: {pdf_url}")
-            # Download the PDF file
-            pdf_response = requests.get(pdf_url, headers=headers, timeout=120) # Longer timeout for PDF download
+            if not pdf_url_on_page: console.print(f"  No PDF link found on page from {domain}"); continue
+            if pdf_url_on_page.startswith("//"): pdf_url_on_page = "https:" + pdf_url_on_page
+            
+            console.print(f"  Downloading PDF from: {pdf_url_on_page}")
+            pdf_response = requests.get(pdf_url_on_page, headers=sci_hub_req_headers, timeout=120)
             pdf_response.raise_for_status()
-
-            # Check content type again
-            if 'application/pdf' not in pdf_response.headers.get('Content-Type', '').lower():
-                 print(f"  [bold yellow]Warning:[/bold yellow] Downloaded content is not PDF from {pdf_url}, trying next domain.")
-                 continue
-
-
-            with open(pdf_filename, 'wb') as f:
-                f.write(pdf_response.content)
-
-            print("  Extracting text from PDF...")
-            with open(pdf_filename, 'rb') as pdf_file:
-                pdf_reader = PdfReader(pdf_file)
-                text_list = []
-                for page in range(len(pdf_reader.pages)):
-                    page_text = pdf_reader.pages[page].extract_text()
-                    if page_text:
-                        text_list.append(page_text)
-                pdf_text = " ".join(text_list)
-
-            print(f"Identifier {identifier} processed successfully via {base_url}.")
-            break # Success, exit the loop
-
-        except requests.exceptions.Timeout:
-             print(f"  Timeout connecting to {base_url} or downloading PDF.")
-             continue # Try next domain
-        except requests.RequestException as e:
-            print(f"  Error with {base_url}: {e}")
-            continue # Try next domain
-        except Exception as e: # Catch other errors (PDF parsing, etc.)
-             print(f"  Error processing identifier {identifier} with {base_url}: {e}")
-             continue # Try next domain
+            if 'application/pdf' not in pdf_response.headers.get('Content-Type','').lower():
+                console.print(f"  [yellow]Downloaded content not PDF from {pdf_url_on_page}, trying next domain.[/yellow]"); continue
+            with open(pdf_filename, 'wb') as f: f.write(pdf_response.content)
+            console.print("  Extracting text from PDF...")
+            with open(pdf_filename, 'rb') as pdf_file_obj:
+                pdf_reader = PdfReader(pdf_file_obj)
+                pdf_text_content_raw = _extract_text_from_pdf_object(pdf_reader, identifier, console) 
+            if not pdf_text_content_raw.strip().startswith("<e>"): console.print(f"Identifier {identifier} processed successfully via {domain}."); break 
+            else: console.print(f"  [yellow]Failed to extract text cleanly from PDF via {domain}, trying next.[/yellow]")
+        except Exception as e: console.print(f"  Error with {domain}: {e}"); continue
         finally:
-             # Clean up temp file even if loop continues
-             if os.path.exists(pdf_filename):
-                 os.remove(pdf_filename)
+            if os.path.exists(pdf_filename): os.remove(pdf_filename)
+    
+    output_xml = f'<source type="sci-hub" identifier="{escape_xml(identifier)}">\n'
+    if pdf_text_content_raw:
+        content_to_insert = pdf_text_content_raw if pdf_text_content_raw.strip().startswith("<e>") else escape_xml(pdf_text_content_raw)
+        output_xml += content_to_insert
+    else: 
+        console.print(f"[bold red]Failed to process identifier {identifier} using all Sci-Hub domains.[/bold red]")
+        output_xml += '<error>Could not retrieve or process PDF via Sci-Hub after trying multiple domains.</error>'
+    output_xml += '\n</source>'
+    return output_xml
 
-    # After trying all domains
-    if pdf_text is not None:
-        # Use XML structure for success
-        formatted_text = f'<source type="sci-hub" identifier="{escape_xml(identifier)}">\n'
-        formatted_text += pdf_text # Append raw extracted text
-        formatted_text += '\n</source>'
-        return formatted_text
-    else:
-        print(f"[bold red]Failed to process identifier {identifier} using all Sci-Hub domains tried.[/bold red]")
-        # Use XML structure for error
-        error_text = f'<source type="sci-hub" identifier="{escape_xml(identifier)}">\n'
-        error_text += f'<error>Could not retrieve or process PDF via Sci-Hub.</error>\n'
-        error_text += '</source>'
-        return error_text
-
-
-def process_github_pull_request(pull_request_url):
-    """
-    Processes a GitHub Pull Request, including details, diff, comments, and associated repo content, wrapped in XML.
-    """
-    if TOKEN == 'default_token_here':
-         print("[bold red]Error:[/bold red] GitHub Token not set. Cannot process GitHub Pull Request.")
-         return f'<source type="github_pull_request" url="{escape_xml(pull_request_url)}"><error>GitHub Token not configured.</error></source>'
-
+def process_github_pull_request(pull_request_url: str, headers_to_use: dict):
     url_parts = pull_request_url.split("/")
     if len(url_parts) < 7 or url_parts[-2] != 'pull':
-        print(f"[bold red]Invalid GitHub Pull Request URL: {pull_request_url}[/bold red]")
         return f'<source type="github_pull_request" url="{escape_xml(pull_request_url)}"><error>Invalid URL format.</error></source>'
-
-    repo_owner = url_parts[3]
-    repo_name = url_parts[4]
-    pull_request_number = url_parts[-1]
-
+    
+    repo_owner, repo_name, pull_request_number = url_parts[3], url_parts[4], url_parts[-1]
     api_base_url = f"https://api.github.com/repos/{repo_owner}/{repo_name}/pulls/{pull_request_number}"
-    repo_url_for_content = f"https://github.com/{repo_owner}/{repo_name}" # Base repo URL
-
+    repo_url_for_content = f"https://github.com/{repo_owner}/{repo_name}"
+    
     try:
-        print(f"Fetching PR data for: {pull_request_url}")
-        response = requests.get(api_base_url, headers=headers)
-        response.raise_for_status()
-        pull_request_data = response.json()
-
-        # Start XML structure
-        formatted_text_list = [f'<source type="github_pull_request" url="{escape_xml(pull_request_url)}">']
-        formatted_text_list.append(f'<title>{escape_xml(pull_request_data.get("title", "N/A"))}</title>') # Use .get for safety
-        formatted_text_list.append('<description>')
-        formatted_text_list.append(pull_request_data.get('body', "") or "") # Append raw body, handle None
-        formatted_text_list.append('</description>')
-        details = (
-            f"User: {pull_request_data.get('user', {}).get('login', 'N/A')}, "
-            f"State: {pull_request_data.get('state', 'N/A')}, "
-            f"Commits: {pull_request_data.get('commits', 'N/A')}, "
-            f"Base: {pull_request_data.get('base', {}).get('label', 'N/A')}, "
-            f"Head: {pull_request_data.get('head', {}).get('label', 'N/A')}"
-        )
-        formatted_text_list.append(f'<details>{escape_xml(details)}</details>')
-
-        # Fetch and add the diff
-        diff_url = pull_request_data.get("diff_url")
-        if diff_url:
-            print("Fetching PR diff...")
-            diff_response = requests.get(diff_url, headers=headers)
-            diff_response.raise_for_status()
-            pull_request_diff = diff_response.text
-            formatted_text_list.append('\n<diff>')
-            formatted_text_list.append(pull_request_diff) # Append raw diff
-            formatted_text_list.append('</diff>')
-        else:
-             formatted_text_list.append('\n<diff><error>Could not retrieve diff URL.</error></diff>')
-
-
-        # Fetch and add comments (PR comments + review comments)
-        all_comments_data = []
-        comments_url = pull_request_data.get("comments_url")
-        review_comments_url = pull_request_data.get("review_comments_url")
-
-        if comments_url:
-            print("Fetching PR comments...")
-            comments_response = requests.get(comments_url, headers=headers)
-            if comments_response.ok:
-                all_comments_data.extend(comments_response.json())
-            else:
-                 print(f"[bold yellow]Warning:[/bold yellow] Could not fetch PR comments: {comments_response.status_code}")
-
-        if review_comments_url:
-             print("Fetching PR review comments...")
-             review_comments_response = requests.get(review_comments_url, headers=headers)
-             if review_comments_response.ok:
-                 all_comments_data.extend(review_comments_response.json())
-             else:
-                 print(f"[bold yellow]Warning:[/bold yellow] Could not fetch review comments: {review_comments_response.status_code}")
-
-
-        if all_comments_data:
-            formatted_text_list.append('\n<comments>')
-             # Optional: Sort comments by creation date or position
-            all_comments_data.sort(key=lambda c: c.get("created_at", ""))
-            for comment in all_comments_data:
-                 author = comment.get('user', {}).get('login', 'N/A')
-                 body = comment.get('body', '') or "" # Handle None
-                 # Add context if available (e.g., path, line for review comments)
-                 path = comment.get('path')
-                 line = comment.get('line') or comment.get('original_line')
-                 context = f' path="{escape_xml(path)}"' if path else ''
-                 context += f' line="{line}"' if line else ''
-                 formatted_text_list.append(f'<comment author="{escape_xml(author)}"{context}>')
-                 formatted_text_list.append(body) # Append raw comment body
-                 formatted_text_list.append('</comment>')
-            formatted_text_list.append('</comments>')
-
-        # Add repository content (will include its own <source> tag)
-        print(f"Fetching associated repository content from: {repo_url_for_content}")
-        # Use the base branch if available, otherwise default branch content
-        base_branch_ref = pull_request_data.get('base', {}).get('ref')
-        repo_url_with_ref = f"{repo_url_for_content}/tree/{base_branch_ref}" if base_branch_ref else repo_url_for_content
-        repo_content = process_github_repo(repo_url_with_ref) # process_github_repo returns XML string
-
-        formatted_text_list.append('\n<!-- Associated Repository Content -->') # XML Comment
-        formatted_text_list.append(repo_content) # Append the XML output directly
-
-        formatted_text_list.append('\n</source>') # Close main PR source tag
-
-        print(f"Pull request {pull_request_number} and repository content processed successfully.")
-        return "\n".join(formatted_text_list)
-
+        print(f"Fetching PR: {pull_request_url}"); 
+        response = requests.get(api_base_url, headers=headers_to_use); response.raise_for_status(); data = response.json()
+        
+        text_l = [f'<source type="github_pull_request" url="{escape_xml(pull_request_url)}">', 
+                  f'<title>{escape_xml(data.get("title","N/A"))}</title>', 
+                  '<description>', escape_xml(data.get("body","") or ""), '</description>', 
+                  f"<details>User: {escape_xml(data.get('user',{}).get('login','N/A'))}, State: {escape_xml(data.get('state','N/A'))}, Commits: {escape_xml(data.get('commits','N/A'))}, Base: {escape_xml(data.get('base',{}).get('label','N/A'))}, Head: {escape_xml(data.get('head',{}).get('label','N/A'))}</details>"]
+        
+        if data.get("diff_url"):
+            print("Fetching PR diff..."); 
+            diff_r = requests.get(data["diff_url"], headers=headers_to_use); diff_r.raise_for_status()
+            text_l.extend(['\n<diff>', escape_xml(diff_r.text), '</diff>']) 
+        
+        comments_l = []
+        for url_key in ["comments_url", "review_comments_url"]:
+            if data.get(url_key):
+                print(f"Fetching {url_key.split('_')[0]} comments..."); 
+                c_r = requests.get(data[url_key], headers=headers_to_use)
+                if c_r.ok: comments_l.extend(c_r.json())
+                else: print(f"[yellow]Warning: Could not fetch {url_key.split('_')[0]} comments: {c_r.status_code}[/yellow]")
+        
+        if comments_l:
+            text_l.append('\n<comments>'); comments_l.sort(key=lambda c:c.get("created_at",""))
+            for c in comments_l:
+                author=escape_xml(c.get('user',{}).get('login','N/A')); body=escape_xml(c.get('body','')or"")
+                path_attr=escape_xml(c.get("path","")); line_attr=escape_xml(str(c.get("line") or c.get("original_line","")))
+                ctx=f' path="{path_attr}"' if path_attr else ''; ctx+=f' line="{line_attr}"' if line_attr else ''
+                text_l.extend([f'<comment author="{author}"{ctx}>', body, '</comment>'])
+            text_l.append('</comments>')
+        
+        print(f"Fetching repo content: {repo_url_for_content}"); base_ref=data.get('base',{}).get('ref')
+        repo_url_with_ref = f"{repo_url_for_content}/tree/{base_ref}" if base_ref else repo_url_for_content
+        text_l.extend(['\n<!-- Associated Repository Content -->', process_github_repo(repo_url_with_ref, headers_to_use=headers_to_use), '\n</source>'])
+        print(f"PR {pull_request_number} processed."); return "\n".join(text_l)
+    
     except requests.RequestException as e:
         print(f"[bold red]Error fetching GitHub PR data for {pull_request_url}: {e}[/bold red]")
         return f'<source type="github_pull_request" url="{escape_xml(pull_request_url)}"><error>Failed to fetch PR data: {escape_xml(str(e))}</error></source>'
-    except Exception as e: # Catch other potential errors
+    except Exception as e: 
          print(f"[bold red]Unexpected error processing GitHub PR {pull_request_url}: {e}[/bold red]")
          return f'<source type="github_pull_request" url="{escape_xml(pull_request_url)}"><error>Unexpected error: {escape_xml(str(e))}</error></source>'
 
-
-def process_github_issue(issue_url):
-    """
-    Processes a GitHub Issue, including details, comments, and associated repo content, wrapped in XML.
-    """
-    if TOKEN == 'default_token_here':
-         print("[bold red]Error:[/bold red] GitHub Token not set. Cannot process GitHub Issue.")
-         return f'<source type="github_issue" url="{escape_xml(issue_url)}"><error>GitHub Token not configured.</error></source>'
-
+def process_github_issue(issue_url: str, headers_to_use: dict):
     url_parts = issue_url.split("/")
     if len(url_parts) < 7 or url_parts[-2] != 'issues':
-        print(f"[bold red]Invalid GitHub Issue URL: {issue_url}[/bold red]")
         return f'<source type="github_issue" url="{escape_xml(issue_url)}"><error>Invalid URL format.</error></source>'
-
-    repo_owner = url_parts[3]
-    repo_name = url_parts[4]
-    issue_number = url_parts[-1]
-
+        
+    repo_owner, repo_name, issue_number = url_parts[3], url_parts[4], url_parts[-1]
     api_base_url = f"https://api.github.com/repos/{repo_owner}/{repo_name}/issues/{issue_number}"
     repo_url_for_content = f"https://github.com/{repo_owner}/{repo_name}"
-
+    
     try:
-        print(f"Fetching issue data for: {issue_url}")
-        response = requests.get(api_base_url, headers=headers)
-        response.raise_for_status()
-        issue_data = response.json()
-
-        # Start XML structure
-        formatted_text_list = [f'<source type="github_issue" url="{escape_xml(issue_url)}">']
-        formatted_text_list.append(f'<title>{escape_xml(issue_data.get("title", "N/A"))}</title>')
-        formatted_text_list.append('<description>')
-        formatted_text_list.append(issue_data.get('body', "") or "") # Append raw body, handle None
-        formatted_text_list.append('</description>')
-        details = (
-             f"User: {issue_data.get('user', {}).get('login', 'N/A')}, "
-             f"State: {issue_data.get('state', 'N/A')}, "
-             f"Number: {issue_data.get('number', 'N/A')}"
-         )
-        formatted_text_list.append(f'<details>{escape_xml(details)}</details>')
-
-
-        # Fetch and add comments
-        comments_data = []
-        comments_url = issue_data.get("comments_url")
-        if comments_url:
-            print("Fetching issue comments...")
-            comments_response = requests.get(comments_url, headers=headers)
-            if comments_response.ok:
-                 comments_data = comments_response.json()
-            else:
-                 print(f"[bold yellow]Warning:[/bold yellow] Could not fetch issue comments: {comments_response.status_code}")
-
-
-        if comments_data:
-            formatted_text_list.append('\n<comments>')
-            # Optional: Sort comments by creation date
-            comments_data.sort(key=lambda c: c.get("created_at", ""))
-            for comment in comments_data:
-                author = comment.get('user', {}).get('login', 'N/A')
-                body = comment.get('body', '') or "" # Handle None
-                formatted_text_list.append(f'<comment author="{escape_xml(author)}">')
-                formatted_text_list.append(body) # Append raw comment body
-                formatted_text_list.append('</comment>')
-            formatted_text_list.append('</comments>')
-
-        # Add repository content (will include its own <source> tag)
-        print(f"Fetching associated repository content from: {repo_url_for_content}")
-        # Fetch default branch content for issues
-        repo_content = process_github_repo(repo_url_for_content) # process_github_repo returns XML string
-
-        formatted_text_list.append('\n<!-- Associated Repository Content -->') # XML Comment
-        formatted_text_list.append(repo_content) # Append the XML output directly
-
-        formatted_text_list.append('\n</source>') # Close main issue source tag
-
-        print(f"Issue {issue_number} and repository content processed successfully.")
-        return "\n".join(formatted_text_list)
+        print(f"Fetching Issue: {issue_url}"); 
+        response = requests.get(api_base_url, headers=headers_to_use); response.raise_for_status(); data = response.json()
+        
+        text_l = [f'<source type="github_issue" url="{escape_xml(issue_url)}">', 
+                  f'<title>{escape_xml(data.get("title","N/A"))}</title>', 
+                  '<description>', escape_xml(data.get("body","") or ""), '</description>', 
+                  f"<details>User: {escape_xml(data.get('user',{}).get('login','N/A'))}, State: {escape_xml(data.get('state','N/A'))}, Number: {escape_xml(data.get('number','N/A'))}</details>"]
+        
+        if data.get("comments_url"):
+            print("Fetching issue comments..."); 
+            c_r = requests.get(data["comments_url"], headers=headers_to_use)
+            if c_r.ok:
+                comments_data = c_r.json()
+                if comments_data:
+                    text_l.append('\n<comments>'); comments_data.sort(key=lambda c:c.get("created_at",""))
+                    for c_item in comments_data: 
+                        author=escape_xml(c_item.get('user',{}).get('login','N/A')); body=escape_xml(c_item.get('body','')or"")
+                        text_l.extend([f'<comment author="{author}">', body, '</comment>'])
+                    text_l.append('</comments>')
+            else: print(f"[yellow]Warning: Could not fetch issue comments: {c_r.status_code}[/yellow]")
+        
+        print(f"Fetching repo content: {repo_url_for_content}")
+        text_l.extend(['\n<!-- Associated Repository Content -->', process_github_repo(repo_url_for_content, headers_to_use=headers_to_use), '\n</source>'])
+        print(f"Issue {issue_number} processed."); return "\n".join(text_l)
 
     except requests.RequestException as e:
         print(f"[bold red]Error fetching GitHub issue data for {issue_url}: {e}[/bold red]")
         return f'<source type="github_issue" url="{escape_xml(issue_url)}"><error>Failed to fetch issue data: {escape_xml(str(e))}</error></source>'
-    except Exception as e: # Catch other potential errors
+    except Exception as e: 
          print(f"[bold red]Unexpected error processing GitHub issue {issue_url}: {e}[/bold red]")
          return f'<source type="github_issue" url="{escape_xml(issue_url)}"><error>Unexpected error: {escape_xml(str(e))}</error></source>'
 
 
-def is_excluded_file(filename):
-    """Check if a file should be excluded based on patterns."""
-    excluded_patterns = [
-        '.pb.go', '_grpc.pb.go', 'mock_', '/generated/', '/mocks/', '.gen.', '_generated.',
-        # Add common compiled/generated file patterns
-        '.min.js', '.min.css', '.dll', '.o', '.so', '.a', '.class', '.pyc',
-        # Common dependency/build directories already handled by EXCLUDED_DIRS, but can add file patterns too
-        'package-lock.json', 'yarn.lock', 'go.sum',
-    ]
-    # Check basename and full path for flexibility
-    basename = os.path.basename(filename)
-    return any(pattern in filename for pattern in excluded_patterns) or \
-           any(basename.startswith(pattern) for pattern in ['mock_']) or \
-           any(basename.endswith(pattern) for pattern in ['.pyc', '.pb.go', '_grpc.pb.go'])
-
-def is_allowed_filetype(filename):
-    """Check if a file should be processed based on its extension and exclusion patterns."""
-    if is_excluded_file(filename):
-        return False
-
-    # Prioritize text-based formats commonly used in code/docs
-    allowed_extensions = [
-        # Code
-        '.py', '.go', '.java', '.c', '.cpp', '.h', '.hpp', '.cs', '.js', '.ts', '.jsx', '.tsx',
-        '.rb', '.php', '.swift', '.kt', '.scala', '.rs', '.lua', '.pl', '.sh', '.bash', '.zsh',
-        '.ps1', '.sql', '.groovy', '.dart',
-        # Config/Data
-        '.json', '.yaml', '.yml', '.xml', '.toml', '.ini', '.cfg', '.conf', '.properties',
-        '.csv', '.tsv', '.proto', '.graphql', '.tf', '.tfvars', '.hcl',
-        # Markup/Docs
-        '.md', '.txt', '.rst', '.tex', '.html', '.htm', '.css', '.scss', '.less', '.pdf',
-        # Notebooks
-        '.ipynb',
-        # Spreadsheets
-        '.xls', '.xlsx',
-        # Other useful text
-        '.dockerfile', 'Dockerfile', '.gitignore', '.gitattributes', 'Makefile', '.env',
-        '.cjs', '.localhost', '.example', # From original list
-        'go.mod', # Go module file
-    ]
-    # Check for exact filename matches first (like Dockerfile)
-    basename = os.path.basename(filename)
-    if basename in ['Dockerfile', 'Makefile', '.gitignore', '.gitattributes', 'go.mod']:
-        return True
-    # Then check extensions
-    return any(filename.lower().endswith(ext) for ext in allowed_extensions)
-
-
-def combine_xml_outputs(outputs):
-    """
-    Combines multiple XML outputs into one cohesive XML document
-    under a <onefilellm_output> root tag.
-    """
-    if not outputs:
-        return None
+def dispatch_processing(input_path_or_url: str, console: Console, config: dict) -> str:
+    console.print(f"\n[green]Dispatching for:[/] [yellow]{input_path_or_url}[/]")
+    max_d, inc_pdf, ign_epub, urls_file = config.get('max_depth',1), config.get('include_pdfs',True), config.get('ignore_epubs',True), config.get('urls_list_file',"processed_urls.txt")
+    headers_for_dispatch = config.get('headers', {}) 
     
-    # If only one output, wrap it in onefilellm_output for consistency
-    # instead of returning it as-is
+    result = "" 
     
-    # Create a wrapper for multiple sources
-    combined = ['<onefilellm_output>']
-    
-    # Add each source
-    for output in outputs:
-        # Remove any XML declaration if present (rare but possible)
-        output = re.sub(r'<\?xml[^>]+\?>', '', output).strip()
-        combined.append(output)
-    
-    # Close the wrapper
-    combined.append('</onefilellm_output>')
-    
-    return '\n'.join(combined)
+    if "github.com" in input_path_or_url:
+        if "/pull/" in input_path_or_url: result = process_github_pull_request(input_path_or_url, headers_to_use=headers_for_dispatch)
+        elif "/issues/" in input_path_or_url: result = process_github_issue(input_path_or_url, headers_to_use=headers_for_dispatch)
+        else: result = process_github_repo(input_path_or_url, headers_to_use=headers_for_dispatch)
+    elif urlparse(input_path_or_url).scheme in ["http","https"]:
+        if "youtube.com" in input_path_or_url or "youtu.be" in input_path_or_url: 
+            result = fetch_youtube_transcript(input_path_or_url) 
+        elif "arxiv.org/abs/" in input_path_or_url: 
+            result = process_arxiv_pdf(input_path_or_url) 
+        elif input_path_or_url.lower().endswith('.pdf'):
+            console.print("[yellow]Direct PDF URL - single page crawl[/yellow]")
+            crawl_res = crawl_and_extract_text(input_path_or_url,0,True,ign_epub, headers_to_use=headers_for_dispatch); result=crawl_res['content']
+        elif input_path_or_url.lower().endswith(('.xls','.xlsx')):
+            console.print(f"Excel URL: {input_path_or_url}")
+            fname=os.path.basename(urlparse(input_path_or_url).path); bname=os.path.splitext(fname)[0]
+            parts=[f'<source type="web_excel" url="{escape_xml(input_path_or_url)}">']
+            try:
+                for sname,md_raw in excel_to_markdown_from_url(input_path_or_url, headers_to_use=headers_for_dispatch).items(): 
+                    parts.append(f'<file path="{escape_xml(f"{bname}_{sname}.md")}">{escape_xml(md_raw)}</file>') 
+            except Exception as e: parts.append(f'<e>Failed Excel URL: {escape_xml(str(e))}</e>')
+            parts.append('</source>'); result='\n'.join(parts)
+        elif any(input_path_or_url.lower().endswith(ext) for ext in [x for x in ['.txt','.md','.rst','.tex','.html','.htm','.css','.js','.ts','.py','.java','.c','.cpp','.h','.hpp','.cs','.rb','.php','.swift','.kt','.scala','.rs','.lua','.pl','.sh','.bash','.zsh','.ps1','.sql','.groovy','.dart','.json','.yaml','.yml','.xml','.toml','.ini','.cfg','.conf','.properties','.csv','.tsv','.proto','.graphql','.tf','.tfvars','.hcl'] if is_allowed_filetype(f"test{x}")] if ext != '.pdf'):
+            console.print(f"Direct file URL: {input_path_or_url}")
+            fcontent_raw=_download_and_read_file(input_path_or_url, headers_to_use=headers_for_dispatch) 
+            fname=os.path.basename(urlparse(input_path_or_url).path)
+            content_to_insert = fcontent_raw if (fcontent_raw and fcontent_raw.strip().startswith("<e>")) else escape_xml(fcontent_raw or "")
+            result = f'<source type="web_file" url="{escape_xml(input_path_or_url)}">\n<file path="{escape_xml(fname)}">\n{content_to_insert}\n</file>\n</source>' 
+        else:
+            crawl_res = crawl_and_extract_text(input_path_or_url,max_d,inc_pdf,ign_epub, headers_to_use=headers_for_dispatch); result=crawl_res['content'] 
+            if crawl_res['processed_urls']:
+                with open(urls_file,'w',encoding='utf-8') as uf: uf.write('\n'.join(crawl_res['processed_urls']))
+    elif (input_path_or_url.startswith("10.") and "/" in input_path_or_url) or input_path_or_url.isdigit():
+        result = process_doi_or_pmid(input_path_or_url) 
+    elif os.path.isdir(input_path_or_url): 
+        result = process_local_folder(input_path_or_url) 
+    elif os.path.isfile(input_path_or_url):
+        if input_path_or_url.lower().endswith('.pdf'):
+            pdf_text_raw = _process_pdf_content_from_path(input_path_or_url) 
+            content_to_insert = pdf_text_raw if pdf_text_raw.strip().startswith("<e>") else escape_xml(pdf_text_raw)
+            result = f'<source type="local_file" path="{escape_xml(input_path_or_url)}">\n<file path="{escape_xml(os.path.basename(input_path_or_url))}">\n{content_to_insert}\n</file>\n</source>' 
+        elif input_path_or_url.lower().endswith(('.xls','.xlsx')):
+            fname=os.path.basename(input_path_or_url);bname=os.path.splitext(fname)[0]
+            parts=[f'<source type="local_file" path="{escape_xml(input_path_or_url)}">']
+            try:
+                for sname,md_raw in excel_to_markdown(input_path_or_url).items(): 
+                    parts.append(f'<file path="{escape_xml(f"{bname}_{sname}.md")}">{escape_xml(md_raw)}</file>') 
+            except Exception as e: parts.append(f'<e>Failed local Excel: {escape_xml(str(e))}</e>')
+            parts.append('</source>'); result='\n'.join(parts)
+        else:
+            fcontent_raw=safe_file_read(input_path_or_url); fname=os.path.basename(input_path_or_url)
+            result = f'<source type="local_file" path="{escape_xml(input_path_or_url)}">\n<file path="{escape_xml(fname)}">\n{escape_xml(fcontent_raw)}\n</file>\n</source>' 
+    else: raise ValueError(f"Input type not recognized: {input_path_or_url}")
+    return result
 
 def process_input(input_path, progress=None, task=None):
-    """
-    Process a single input path and return the XML output.
-    Extracted from main() for reuse with multiple inputs.
-    """
-    console = Console()
-    urls_list_file = "processed_urls.txt"
-    
+    console=Console(); 
+    cfg={'github_token':TOKEN, 'headers':headers, 'max_depth':1, 'include_pdfs':True, 'ignore_epubs':True, 'urls_list_file':"processed_urls.txt"}
     try:
-        if task:
-            progress.update(task, description=f"[bright_blue]Processing {input_path}...")
-        
-        console.print(f"\n[bold bright_green]Processing:[/bold bright_green] [bold bright_yellow]{input_path}[/bold bright_yellow]\n")
-        
-        # Input type detection logic
-        if "github.com" in input_path:
-            if "/pull/" in input_path:
-                result = process_github_pull_request(input_path)
-            elif "/issues/" in input_path:
-                result = process_github_issue(input_path)
-            else: # Assume repository URL
-                result = process_github_repo(input_path)
-        elif urlparse(input_path).scheme in ["http", "https"]:
-            if "youtube.com" in input_path or "youtu.be" in input_path:
-                result = fetch_youtube_transcript(input_path)
-            elif "arxiv.org/abs/" in input_path:
-                result = process_arxiv_pdf(input_path)
-            elif input_path.lower().endswith(('.pdf')): # Direct PDF link
-                # Simplified: wrap direct PDF processing if needed, or treat as web crawl
-                print("[bold yellow]Direct PDF URL detected - treating as single-page crawl.[/bold yellow]")
-                crawl_result = crawl_and_extract_text(input_path, max_depth=0, include_pdfs=True, ignore_epubs=True)
-                result = crawl_result['content']
-                if crawl_result['processed_urls']:
-                    with open(urls_list_file, 'w', encoding='utf-8') as urls_file:
-                        urls_file.write('\n'.join(crawl_result['processed_urls']))
-            elif input_path.lower().endswith(('.xls', '.xlsx')): # Direct Excel file link
-                console.print(f"Processing Excel file from URL: {input_path}")
-                try:
-                    filename = os.path.basename(urlparse(input_path).path)
-                    base_filename = os.path.splitext(filename)[0]
-                    
-                    # Get markdown tables for each sheet
-                    result_parts = [f'<source type="web_excel" url="{escape_xml(input_path)}">']
-                    
-                    try:
-                        markdown_tables = excel_to_markdown_from_url(input_path)
-                        for sheet_name, markdown in markdown_tables.items():
-                            virtual_name = f"{base_filename}_{sheet_name}.md"
-                            result_parts.append(f'<file path="{escape_xml(virtual_name)}">')
-                            result_parts.append(markdown)
-                            result_parts.append('</file>')
-                    except Exception as e:
-                        result_parts.append(f'<e>Failed to process Excel file from URL: {escape_xml(str(e))}</e>')
-                    
-                    result_parts.append('</source>')
-                    result = '\n'.join(result_parts)
-                except Exception as e:
-                    console.print(f"[bold red]Error processing Excel URL {input_path}: {e}[/bold red]")
-                    result = f'<source type="web_excel" url="{escape_xml(input_path)}"><e>Failed to process Excel file: {escape_xml(str(e))}</e></source>'
-            # Process URL directly if it ends with a recognized file extension
-            elif any(input_path.lower().endswith(ext) for ext in [ext for ext in ['.txt', '.md', '.rst', '.tex', '.html', '.htm', '.css', '.js', '.ts', '.py', '.java', '.c', '.cpp', '.h', '.hpp', '.cs', '.rb', '.php', '.swift', '.kt', '.scala', '.rs', '.lua', '.pl', '.sh', '.bash', '.zsh', '.ps1', '.sql', '.groovy', '.dart', '.json', '.yaml', '.yml', '.xml', '.toml', '.ini', '.cfg', '.conf', '.properties', '.csv', '.tsv', '.proto', '.graphql', '.tf', '.tfvars', '.hcl'] if is_allowed_filetype(f"test{ext}")] if ext != '.pdf'):
-                console.print(f"Processing direct file URL: {input_path}")
-                file_content = _download_and_read_file(input_path)
-                filename = os.path.basename(urlparse(input_path).path)
-                result = (f'<source type="web_file" url="{escape_xml(input_path)}">\n'
-                         f'<file path="{escape_xml(filename)}">\n'
-                         f'{file_content}\n'
-                         f'</file>\n'
-                         f'</source>')
-            else: # Assume general web URL for crawling
-                crawl_result = crawl_and_extract_text(input_path, max_depth=1, include_pdfs=True, ignore_epubs=True) # Default max_depth=1
-                result = crawl_result['content']
-                if crawl_result['processed_urls']:
-                    with open(urls_list_file, 'w', encoding='utf-8') as urls_file:
-                        urls_file.write('\n'.join(crawl_result['processed_urls']))
-        # Basic check for DOI (starts with 10.) or PMID (all digits)
-        elif (input_path.startswith("10.") and "/" in input_path) or input_path.isdigit():
-            result = process_doi_or_pmid(input_path)
-        elif os.path.isdir(input_path): # Check if it's a local directory
-            result = process_local_folder(input_path)
-        elif os.path.isfile(input_path): # Handle single local file
-            if input_path.lower().endswith('.pdf'): # Case-insensitive check
-                console.print(f"Processing single local PDF file: {input_path}") # Use console for consistency
-                pdf_content_text = _process_pdf_content_from_path(input_path)
-                # Structure for a single local PDF file
-                result = (f'<source type="local_file" path="{escape_xml(input_path)}">\n'
-                         f'<file path="{escape_xml(os.path.basename(input_path))}">\n' # Wrapping content in <file>
-                         f'{pdf_content_text}\n' # Raw PDF text or error message
-                         f'</file>\n'
-                         f'</source>')
-            elif input_path.lower().endswith(('.xls', '.xlsx')): # Case-insensitive check for Excel files
-                console.print(f"Processing single local Excel file: {input_path}")
-                try:
-                    filename = os.path.basename(input_path)
-                    base_filename = os.path.splitext(filename)[0]
-                    
-                    # Get markdown tables for each sheet
-                    result_parts = [f'<source type="local_file" path="{escape_xml(input_path)}">']
-                    
-                    try:
-                        markdown_tables = excel_to_markdown(input_path)
-                        for sheet_name, markdown in markdown_tables.items():
-                            virtual_name = f"{base_filename}_{sheet_name}.md"
-                            result_parts.append(f'<file path="{escape_xml(virtual_name)}">')
-                            result_parts.append(markdown)
-                            result_parts.append('</file>')
-                    except Exception as e:
-                        result_parts.append(f'<e>Failed to process Excel file: {escape_xml(str(e))}</e>')
-                    
-                    result_parts.append('</source>')
-                    result = '\n'.join(result_parts)
-                except Exception as e:
-                    console.print(f"[bold red]Error processing Excel file {input_path}: {e}[/bold red]")
-                    result = f'<source type="local_file" path="{escape_xml(input_path)}"><e>Failed to process Excel file: {escape_xml(str(e))}</e></source>'
-            else:
-                # Existing logic for other single files
-                console.print(f"Processing single local file: {input_path}") # Use console
-                relative_path = os.path.basename(input_path)
-                file_content = safe_file_read(input_path)
-                result = (f'<source type="local_file" path="{escape_xml(input_path)}">\n'
-                         f'<file path="{escape_xml(relative_path)}">\n'
-                         f'{file_content}\n'
-                         f'</file>\n'
-                         f'</source>')
-        else: # Input not recognized
-            raise ValueError(f"Input path or URL type not recognized: {input_path}")
-            
-        return result
-        
+        if task and progress: progress.update(task,description=f"[blue]Processing {input_path}...")
+        return dispatch_processing(input_path, console, cfg)
     except Exception as e:
-        console.print(f"\n[bold red]Error processing {input_path}:[/bold red] {str(e)}")
-        # Return an error-wrapped source instead of raising
-        return f'<source type="error" path="{escape_xml(input_path)}">\n<e>Failed to process: {escape_xml(str(e))}</e>\n</source>'
+        console.print(f"\n[red]Error processing '{input_path}': {e}[/red]"); console.print_exception(show_locals=False)
+        return f'<source type="error" path="{escape_xml(input_path)}"><e>Failed: {escape_xml(str(e))}</e></source>'
 
 def main():
-    console = Console()
-
-    # Check if help is requested
-    if len(sys.argv) > 1 and sys.argv[1] in ["--help", "-h"]:
-        help_text = Text("\nonefilellm - Content Aggregation Tool\n", style="bright_white bold")
-        help_text.append("\nUsage:", style="bright_blue")
-        help_text.append("\n  python onefilellm.py [options] [path|url|alias]", style="bright_white")
-        
-        help_text.append("\n\nStandard Input Options:", style="bright_green")
-        help_text.append("\n  - ", style="bright_white")
-        help_text.append("                      Read text from standard input (stdin)", style="bright_cyan")
-        help_text.append("\n                           Example: cat report.txt | python onefilellm.py -", style="dim")
-        
-        help_text.append("\n  -c, --clipboard", style="bright_white")
-        help_text.append("         Read text from the system clipboard", style="bright_cyan")
-        
-        help_text.append("\n  -f TYPE, --format TYPE", style="bright_white")
-        help_text.append("  Force processing the input stream as TYPE", style="bright_cyan")
-        help_text.append("\n                           Supported TYPEs: text, markdown, json, html, yaml,", style="dim")
-        help_text.append("\n                                            doculing, markitdown", style="dim")
-        help_text.append("\n                           Example: cat README.md | python onefilellm.py - -f markdown", style="dim")
-        
-        help_text.append("\n\nAlias Management:", style="bright_green")
-        help_text.append("\n  --add-alias NAME URL    Create or update an alias NAME for the URL/path", style="bright_white")
-        help_text.append("\n  --alias-from-clipboard NAME", style="bright_white")
-        help_text.append("  Create an alias from clipboard contents", style="bright_cyan")
-        
-        help_text.append("\n\nGeneral Options:", style="bright_green")
-        help_text.append("\n  -h, --help", style="bright_white")
-        help_text.append("             Show this help message and exit", style="bright_cyan")
-        
-        help_panel = Panel(
-            help_text,
-            expand=False,
-            border_style="bold",
-            padding=(1, 2)
-        )
-        console.print(help_panel)
+    console=Console()
+    if any(arg in sys.argv for arg in ["--help","-h"]): 
+        console.print("onefilellm - Aggregate content into a single XML structure.")
+        console.print("Usage: python onefilellm.py [options] [input_path|url|alias ...]")
+        console.print("\nUse --add-alias or --alias-from-clipboard for alias management.")
         return
 
-    # --- Start of New CLI Argument Handling for Streams ---
-    raw_args = sys.argv[1:] # Get arguments after the script name
+    raw_args = sys.argv[1:]; stream_input_mode=False; stream_source_dict={}; stream_content=None; user_fmt_override=None
+    input_paths = []
+    temp_raw_args = list(raw_args) 
 
-    is_stream_input_mode = False
-    stream_source_dict = {} # To store {'type': 'stdin'} or {'type': 'clipboard'}
-    stream_content_to_process = None
-    user_format_override = None # For --format TYPE
-
-    # 1. Check for --format or -f (must be done before consuming other args)
-    temp_raw_args = list(raw_args) # Create a copy to modify while parsing --format
-    
     try:
         if "--format" in temp_raw_args:
             idx = temp_raw_args.index("--format")
-            if idx + 1 < len(temp_raw_args):
-                user_format_override = temp_raw_args[idx + 1].lower()
-                # Remove --format and its value so they don't interfere later
-                raw_args.pop(raw_args.index("--format")) 
-                raw_args.pop(raw_args.index(user_format_override))
-            else:
-                console.print("[bold red]Error: --format option requires a TYPE argument (e.g., --format markdown).[/bold red]")
-                return
+            if idx + 1 < len(temp_raw_args): user_fmt_override = temp_raw_args.pop(idx + 1).lower(); temp_raw_args.pop(idx) 
+            else: console.print("[bold red]Error: --format requires a TYPE.[/bold red]"); return
         elif "-f" in temp_raw_args:
             idx = temp_raw_args.index("-f")
-            if idx + 1 < len(temp_raw_args):
-                user_format_override = temp_raw_args[idx + 1].lower()
-                raw_args.pop(raw_args.index("-f"))
-                raw_args.pop(raw_args.index(user_format_override))
-            else:
-                console.print("[bold red]Error: -f option requires a TYPE argument (e.g., -f markdown).[/bold red]")
-                return
-    except ValueError: # Should not happen if --format/ -f is present, but good for safety
-        console.print("[bold red]Error parsing --format/-f option.[/bold red]")
-        return
-    
-    # Supported formats for the --format flag (as per UX requirements)
-    supported_formats_for_override = ["text", "markdown", "json", "yaml", "html", "doculing", "markitdown"]
-    if user_format_override and user_format_override not in supported_formats_for_override:
-        # Print to stderr for better error detection in tests
-        print(f"Error: Invalid format type '{user_format_override}' specified with --format/-f.", file=sys.stderr)
-        console.print(f"[bold red]Error: Invalid format type '{user_format_override}' specified with --format/-f.[/bold red]")
-        console.print(f"Supported types are: {', '.join(supported_formats_for_override)}")
-        sys.exit(1)  # Exit with error code for better error detection
+            if idx + 1 < len(temp_raw_args): user_fmt_override = temp_raw_args.pop(idx + 1).lower(); temp_raw_args.pop(idx)
+            else: console.print("[bold red]Error: -f requires a TYPE.[/bold red]"); return
+    except ValueError: console.print("[bold red]Error parsing --format/-f.[/bold red]"); return
+    raw_args = temp_raw_args 
 
-    # 2. Check for stream input flags ('-' or '--clipboard' / '-c')
-    # These flags should typically be the primary non-option argument if no alias/path is given
-    
-    if "-" in raw_args: # Standard input
-        # Ensure '-' is the only primary arg, or handle it if it's part of alias resolution later.
-        # For now, assume if '-' is present, it's for stdin.
-        # We also need to make sure it's not an alias name starting/ending with '-'
-        # For simplicity in V1, if '-' is present, we assume stdin mode.
-        if not sys.stdin.isatty(): # Check if data is actually being piped
-            console.print("[bright_blue]Reading from standard input...[/bright_blue]")
-            stream_content_to_process = read_from_stdin()
-            if stream_content_to_process is None or not stream_content_to_process.strip():
-                console.print("[bold red]Error: No input received from standard input or input is empty.[/bold red]")
-                return
-            is_stream_input_mode = True
-            stream_source_dict = {'type': 'stdin'}
-        else:
-            # '-' was passed but nothing is piped. This could be an error,
-            # or it could be part of a filename/alias. The existing alias logic might handle this.
-            # For now, if isatty() is true, we won't enter stream_input_mode here.
-            # The user should pipe something: `echo "data" | python onefilellm.py -`
-            warning_msg = "Warning: '-' argument received, but no data seems to be piped via standard input."
-            # Print to both stdout and stderr for better test detection
-            print(warning_msg)
-            print(warning_msg, file=sys.stderr)  
-            console.print(f"[bold yellow]{warning_msg}[/bold yellow]")
-            console.print("To use standard input, pipe data like: `your_command | python onefilellm.py -`")
-            # Let it fall through to existing alias/path processing to see if "-" is part of a name.
-            # If it's truly meant for stdin without a pipe, it will fail if no content is read.
-
+    if "-" in raw_args:
+        if not sys.stdin.isatty():
+            console.print("[blue]Reading from stdin...[/blue]")
+            stream_content = read_from_stdin()
+            if not stream_content: console.print("[red]Error: No input from stdin.[/red]"); return
+            is_stream_input_mode = True; stream_source_dict = {'type': 'stdin'}; raw_args.remove("-")
     elif "--clipboard" in raw_args or "-c" in raw_args:
-        console.print("[bright_blue]Reading from clipboard...[/bright_blue]")
-        stream_content_to_process = read_from_clipboard()
-        if stream_content_to_process is None or not stream_content_to_process.strip():
-            console.print("[bold red]Error: Clipboard is empty, does not contain text, or could not be accessed.[/bold red]")
-            # Check for common Linux issue
-            if sys.platform.startswith('linux'):
-                console.print("[yellow]On Linux, you might need to install 'xclip' or 'xsel': `sudo apt install xclip`[/yellow]")
-            return
-        is_stream_input_mode = True
-        stream_source_dict = {'type': 'clipboard'}
-    # --- End of New CLI Argument Handling for Streams ---
+        console.print("[blue]Reading from clipboard...[/blue]")
+        stream_content = read_from_clipboard()
+        if not stream_content: console.print("[red]Error: No input from clipboard.[/red]"); return
+        is_stream_input_mode = True; stream_source_dict = {'type': 'clipboard'}
+        if "--clipboard" in raw_args: raw_args.remove("--clipboard")
+        if "-c" in raw_args: raw_args.remove("-c")
 
-    # --- Existing Alias Management Commands (should be checked before stream mode fully takes over if stream args were not used) ---
-    # This logic should come *after* we check for stream-specific args,
-    # so --add-alias isn't mistaken for a stream operation.
-    # We need to adjust `raw_args` if --format was consumed.
+    if raw_args:
+        current_arg = raw_args[0]
+        if current_arg == "--add-alias": handle_add_alias(raw_args, console); return
+        elif current_arg == "--alias-from-clipboard": handle_alias_from_clipboard(raw_args, console); return
+        else: 
+            for arg_str in raw_args: input_paths.extend(resolve_single_input_source(arg_str, console))
     
-    # Re-check raw_args because --format might have been removed
-    current_cli_args_for_alias_check = sys.argv[1:] # Use original full list for alias commands
-    if "--add-alias" in current_cli_args_for_alias_check:
-        if handle_add_alias(current_cli_args_for_alias_check, console): # handle_add_alias expects original raw_args
-            return 
-    elif "--alias-from-clipboard" in current_cli_args_for_alias_check:
-        if handle_alias_from_clipboard(current_cli_args_for_alias_check, console):
-            return
+    if not input_paths and not is_stream_input_mode :
+        if sys.stdin.isatty() and "-" not in sys.argv[1:]: 
+             user_input = Prompt.ask("\nEnter path, URL, or alias", console=console).strip()
+             if user_input: input_paths.extend(resolve_single_input_source(user_input, console))
+        elif "-" in sys.argv[1:] and sys.stdin.isatty(): 
+            console.print("[yellow]Warning: '-' given but no data piped to stdin.[/yellow]")
+
+    if not input_paths and not is_stream_input_mode: console.print("[yellow]No input. Exiting.[/yellow]"); return
     
-    # --- Main Processing Logic Dispatch ---
-    if is_stream_input_mode:
-        # We are in stream processing mode
-        if stream_content_to_process: # Ensure we have content
-            xml_output_for_stream = process_text_stream(
-                stream_content_to_process, 
-                stream_source_dict, 
-                console, # Pass the console object
-                user_format_override
-            )
-
-            if xml_output_for_stream:
-                # For a single stream input, it forms the entire <onefilellm_output>
-                final_combined_output = f"<onefilellm_output>\n{xml_output_for_stream}\n</onefilellm_output>"
-
-                # Use existing output mechanisms
-                output_file = "output.xml" 
-                processed_file = "compressed_output.txt" 
-
-                console.print(f"\nWriting output to {output_file}...")
-                with open(output_file, "w", encoding="utf-8") as file:
-                    file.write(final_combined_output)
-                console.print("Output written successfully.")
-
-                uncompressed_token_count = get_token_count(final_combined_output)
-                console.print(f"\n[bright_green]Content Token Count (approx):[/bright_green] [bold bright_cyan]{uncompressed_token_count}[/bold bright_cyan]")
-
-                if ENABLE_COMPRESSION_AND_NLTK:
-                    # ... (existing compression logic using output_file and processed_file) ...
-                    console.print("\n[bright_magenta]Compression and NLTK processing enabled.[/bright_magenta]")
-                    print(f"Preprocessing text and writing compressed output to {processed_file}...")
-                    preprocess_text(output_file, processed_file) # Pass correct output_file
-                    print("Compressed file written.")
-                    compressed_text_content = safe_file_read(processed_file)
-                    compressed_token_count = get_token_count(compressed_text_content)
-                    console.print(f"[bright_green]Compressed Token Count (approx):[/bright_green] [bold bright_cyan]{compressed_token_count}[/bold bright_cyan]")
-
-                try:
-                    pyperclip.copy(final_combined_output)
-                    console.print(f"\n[bright_white]The contents of [bold bright_blue]{output_file}[/bold bright_blue] have been copied to the clipboard.[/bright_white]")
-                except Exception as clip_err:
-                    console.print(f"\n[bold yellow]Warning:[/bold yellow] Could not copy to clipboard: {clip_err}")
-            else:
-                console.print("[bold red]Error: Text stream processing failed to generate output.[/bold red]")
-        # else: stream_content_to_process was None or empty, error already printed.
-        return # Exit after stream processing
-
-    # --- ELSE: Fall through to existing file/URL/alias processing logic ---
-
-    # Updated intro text to reflect XML output
-    intro_text = Text("\nProcesses Inputs and Wraps Content in XML:\n", style="dodger_blue1")
-    input_types = [
-        ("• Local folder path", "bright_white"),
-        ("• GitHub repository URL", "bright_white"),
-        ("• GitHub pull request URL (PR + Repo)", "bright_white"),
-        ("• GitHub issue URL (Issue + Repo)", "bright_white"),
-        ("• Documentation URL (Web Crawl)", "bright_white"),
-        ("• YouTube video URL (Transcript)", "bright_white"),
-        ("• ArXiv Paper URL (PDF Text)", "bright_white"),
-        ("• DOI or PMID (via Sci-Hub, best effort)", "bright_white"),
-        ("• Text from stdin (e.g., `cat file.txt | onefilellm -`)", "light_sky_blue1"), # New
-        ("• Text from clipboard (e.g., `onefilellm --clipboard`)", "light_sky_blue1"), # New
-    ]
-
-    for input_type, color in input_types:
-        intro_text.append(f"\n{input_type}", style=color)
-    intro_text.append("\n\nOutput is saved to file and copied to clipboard.", style="dim")
-    intro_text.append("\nContent within XML tags remains unescaped for readability.", style="dim")
-    intro_text.append("\nMultiple inputs can be provided as command line arguments.", style="bright_green")
-
-    intro_panel = Panel(
-        intro_text,
-        expand=False,
-        border_style="bold",
-        title="[bright_white]onefilellm - Content Aggregator[/bright_white]",
-        title_align="center",
-        padding=(1, 1),
-    )
-    console.print(intro_panel)
-
-    # --- Determine Input Paths (resolve aliases) ---
-    final_input_sources = []
-    if raw_args: # Use the raw_args that might have had --format removed
-        for arg_string in raw_args:
-            # Important: If '-', '--clipboard', or '-c' are still in raw_args here,
-            # it means they weren't consumed by stream mode (e.g., '-' with no pipe).
-            # The resolve_single_input_source should probably ignore these specific flags
-            # or treat them as invalid paths if they reach this point.
-            if arg_string not in ["-", "--clipboard", "-c"]: # Avoid re-processing stream flags as paths
-                final_input_sources.extend(resolve_single_input_source(arg_string, console))
+    outputs=[]
+    if is_stream_input_mode and stream_content:
+        res = process_text_stream(stream_content, stream_source_dict, console, user_fmt_override)
+        if res: outputs.append(res)
+    elif input_paths:
+        with Progress(TextColumn("[blue]{task.description}"), BarColumn(), TimeRemainingColumn(), console=console, transient=True) as progress:
+            task = progress.add_task("Processing inputs...", total=len(input_paths))
+            for i, path in enumerate(input_paths):
+                res = process_input(path, progress, task) 
+                if res: outputs.append(res); console.print(f"[green]Processed: {path}[/green]")
+                else: console.print(f"[yellow]No output for: {path}[/yellow]")
+                progress.update(task, advance=1)
     
-    if not final_input_sources: # No command line args left, or all were empty aliases or resolved to empty
-        # This ensures interactive prompt only if no actual inputs determined
-        # and it wasn't an alias management command that already exited.
-        user_input_string = Prompt.ask("\n[bold dodger_blue1]Enter the path, URL, or alias[/bold dodger_blue1]", console=console).strip()
-        if user_input_string: # Process only if user provided some input
-            # Check again if user typed a stream command here by mistake
-            if user_input_string == "-":
-                console.print("[bold red]Error: To use '-', pipe data via stdin: `your_command | python onefilellm.py -`[/bold red]")
-                return
-            elif user_input_string == "--clipboard" or user_input_string == "-c":
-                console.print("[bold red]Error: To use clipboard, run as: `python onefilellm.py --clipboard`[/bold red]")
-                return
-            final_input_sources.extend(resolve_single_input_source(user_input_string, console))
+    if not outputs: console.print("[red]No output generated.[/red]"); return
+    final_xml = combine_xml_outputs(outputs)
+    output_file="output.xml"; compressed_file="compressed_output.txt"
     
-    # For minimal changes later, assign to input_paths
-    input_paths = final_input_sources
-    # --- End Determine Input Paths ---
+    try:
+        with open(output_file, "w", encoding="utf-8") as f: f.write(final_xml)
+        console.print(f"\nOutput written to {output_file}")
+        console.print(f"Uncompressed Tokens: {get_token_count(final_xml)}")
 
-    if not input_paths:
-        console.print("[yellow]No valid input sources provided. Exiting.[/yellow]")
-        return
-
-    # Define output filenames
-    output_file = "output.xml" # Changed extension to reflect content
-    processed_file = "compressed_output.txt" # Keep as txt for compressed
-    
-    # List to collect individual outputs
-    outputs = []
-
-    with Progress(
-        TextColumn("[bold bright_blue]{task.description}"),
-        BarColumn(bar_width=None),
-        TimeRemainingColumn(),
-        console=console,
-        transient=True # Clear progress on exit
-    ) as progress:
-
-        task = progress.add_task("[bright_blue]Processing...", total=None) # Indeterminate task
-
-        try:
-            # Process each input path
-            for input_path in input_paths:
-                result = process_input(input_path, progress, task)
-                if result:
-                    outputs.append(result)
-                    console.print(f"[green]Successfully processed: {input_path}[/green]")
-                else:
-                    console.print(f"[yellow]No output generated for: {input_path}[/yellow]")
-            
-            # Combine all outputs into one final output
-            if not outputs:
-                raise RuntimeError("No inputs were successfully processed.")
-                
-            final_output = combine_xml_outputs(outputs)
-
-            # --- Output Generation ---
-            if final_output is None:
-                 raise RuntimeError("Processing failed to produce any output.")
-
-            # Write the main (uncompressed) XML output
-            print(f"\nWriting output to {output_file}...")
-            with open(output_file, "w", encoding="utf-8") as file:
-                file.write(final_output)
-            print("Output written successfully.")
-
-            # Get token count for the main output (strips XML tags)
-            uncompressed_token_count = get_token_count(final_output)
-            console.print(f"\n[bright_green]Content Token Count (approx):[/bright_green] [bold bright_cyan]{uncompressed_token_count}[/bold bright_cyan]")
-
-            # --- Conditional Compression Block ---
-            if ENABLE_COMPRESSION_AND_NLTK:
-                console.print("\n[bright_magenta]Compression and NLTK processing enabled.[/bright_magenta]")
-                print(f"Preprocessing text and writing compressed output to {processed_file}...")
-                # Process the text (input is the XML file, output is compressed txt)
-                preprocess_text(output_file, processed_file)
-                print("Compressed file written.")
-
-                # Get token count for the compressed file (should be plain text)
-                compressed_text = safe_file_read(processed_file)
-                compressed_token_count = get_token_count(compressed_text) # Pass compressed text directly
-                console.print(f"[bright_green]Compressed Token Count (approx):[/bright_green] [bold bright_cyan]{compressed_token_count}[/bold bright_cyan]")
-                console.print(f"\n[bold bright_blue]{output_file}[/bold bright_blue] (main XML) and [bold bright_yellow]{processed_file}[/bold bright_yellow] (compressed text) created.")
-            else:
-                 console.print(f"\n[bold bright_blue]{output_file}[/bold bright_blue] (main XML) has been created.")
-            # --- End Conditional Compression Block ---
-
-
-            # Copy the main XML output to clipboard
-            try:
-                 pyperclip.copy(final_output)
-                 console.print(f"\n[bright_white]The contents of [bold bright_blue]{output_file}[/bold bright_blue] have been copied to the clipboard.[/bright_white]")
-            except Exception as clip_err: # Catch potential pyperclip errors
-                 console.print(f"\n[bold yellow]Warning:[/bold yellow] Could not copy to clipboard: {clip_err}")
-
-
-        except Exception as e:
-            console.print(f"\n[bold red]An error occurred during processing:[/bold red]")
-            console.print_exception(show_locals=False) # Print traceback
-            # Optionally write the partial output if it exists
-            if outputs:
-                 try:
-                     error_filename = "error_output.xml"
-                     partial_output = combine_xml_outputs(outputs)
-                     with open(error_filename, "w", encoding="utf-8") as err_file:
-                         err_file.write(partial_output)
-                     console.print(f"[yellow]Partial output written to {error_filename}[/yellow]")
-                 except Exception as write_err:
-                     console.print(f"[red]Could not write partial output: {write_err}[/red]")
-
-        finally:
-             progress.stop_task(task)
-             progress.refresh() # Ensure progress bar clears
-
+        if ENABLE_COMPRESSION_AND_NLTK:
+            console.print(f"Compressing and writing to {compressed_file}...")
+            preprocess_text(output_file, compressed_file) 
+            compressed_content = safe_file_read(compressed_file)
+            console.print(f"Compressed Tokens: {get_token_count(compressed_content)}")
+        
+        pyperclip.copy(final_xml)
+        console.print(f"Main output copied to clipboard.")
+    except Exception as e:
+        console.print(f"[red]Error during final output/compression: {e}[/red]")
 
 if __name__ == "__main__":
     main()
