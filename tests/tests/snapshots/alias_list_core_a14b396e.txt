@@ -1,9 +1,0 @@
-STDOUT:
-
-Core Aliases:
-- arxiv_search (core): 
-"https://arxiv.org/search/?query={}&searchtype=all&source=header"
-- gh_search (core): "https://github.com/search?q={}"
-- ofl_readme (core): 
-"https://github.com/jimmc414/onefilellm/blob/main/readme.md"
-- ofl_repo (core): "https://github.com/jimmc414/onefilellm"

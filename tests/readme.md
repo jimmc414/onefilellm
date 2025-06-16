@@ -2,11 +2,7 @@
 
 ## Overview
 
-OneFileLLM has a comprehensive test suite with over 176 tests across two testing frameworks:
-
-1. **Original Test Suite** (`test_all.py`): 57+ unit tests using Python's unittest framework
-2. **Recorded Test Suite** (`test_recorded_*.py`): 119 auto-generated tests using pytest with snapshot testing
-3. **Unified Test Runner** (`run_all_tests.py`): NEW! A unified runner that executes both test suites with consolidated reporting
+The comprehensive test suite for OneFileLLM is consolidated in `test_all.py`, which replaces the previous separate test files. This suite provides extensive coverage of all functionality with 38+ tests organized into logical categories.
 
 ## Test Categories
 
@@ -67,86 +63,22 @@ OneFileLLM has a comprehensive test suite with over 176 tests across two testing
 - Unicode character support
 - Special character handling
 
-### 10. **Recorded Tests** (`test_recorded_*.py`)
-The recorded test suite provides comprehensive coverage of real-world scenarios:
-- **Alias Operations**: Core aliases, custom aliases, placeholder expansion
-- **ArXiv Integration**: Paper fetching, README generation
-- **Complex Scenarios**: Multi-source aggregation, Kubernetes/Istio docs
-- **Web Crawling**: Django docs, FastAPI docs, respectful crawling
-- **Directory Processing**: Various directory structures and exclusions
-- **DOI Resolution**: Academic paper fetching
-- **Error Handling**: File not found, invalid URLs, permission errors
-- **Format Support**: JSON, Markdown, HTML, YAML output formats
-- **GitHub Integration**: Repos, issues, PRs, branches
-- **Help System**: Command help, topic-specific help
-- **Local Files**: Various file types (CSV, JSON, Python, etc.)
-- **Multi-Input**: Multiple sources in single command
-- **PMID/PubMed**: Medical literature fetching
-- **Standard Input**: Various stdin scenarios
-- **Web Pages**: API docs, blogs, React docs
-- **YouTube**: Transcript extraction
-
 ## Running Tests
 
-### Unified Test Runner (Recommended)
-
-The new unified test runner executes both unittest and pytest suites in a single command:
-
-```bash
-# Run all tests (both unittest and pytest)
-python tests/run_all_tests.py
-
-# Run only unittest suite
-python tests/run_all_tests.py --framework unittest
-
-# Run only pytest suite  
-python tests/run_all_tests.py --framework pytest
-
-# Run with integration tests
-python tests/run_all_tests.py --integration
-
-# Run pytest with snapshot update
-python tests/run_all_tests.py --framework pytest --snapshot-update
-
-# Run tests in parallel (requires pytest-xdist)
-python tests/run_all_tests.py --parallel
-
-# Output in different formats
-python tests/run_all_tests.py --output-format json
-python tests/run_all_tests.py --output-format plain
-
-# Show help
-python tests/run_all_tests.py --help
-```
-
-### Legacy Test Runners
-
-You can still run the test suites individually:
-
-#### Unittest Suite (test_all.py)
+### Basic Usage
 
 ```bash
 # Run all basic tests (no network required)
-python tests/test_all.py
+python test_all.py
 
 # Run with quiet output
-python tests/test_all.py --quiet
+python test_all.py --quiet
 
 # Run with verbose output
-python tests/test_all.py --verbose
-```
+python test_all.py --verbose
 
-#### Pytest Suite (test_recorded_*.py)
-
-```bash
-# Run all recorded tests
-pytest tests/test_recorded_*.py
-
-# Update snapshots
-pytest tests/test_recorded_*.py --snapshot-update
-
-# Run specific test file
-pytest tests/test_recorded_github_onefilellm.py -v
+# Show help
+python test_all.py --help
 ```
 
 ### Integration Tests
@@ -154,35 +86,17 @@ pytest tests/test_recorded_github_onefilellm.py -v
 Integration tests require network access and are disabled by default:
 
 ```bash
-# Enable integration tests with unified runner
-python tests/run_all_tests.py --integration
+# Enable integration tests
+python test_all.py --integration
 
 # Enable slow tests (ArXiv, web crawling)
-python tests/run_all_tests.py --slow
+python test_all.py --slow
 
 # Run all tests including integration
-python tests/run_all_tests.py --integration --slow
+python test_all.py --integration --slow
 
 # With GitHub token for private repo tests
-GITHUB_TOKEN=your_token python tests/run_all_tests.py --integration
-```
-
-### Test Configuration
-
-The unified test runner supports configuration through environment variables:
-
-```bash
-# Set test verbosity
-export TEST_VERBOSITY=3
-
-# Enable integration tests by default
-export RUN_INTEGRATION_TESTS=true
-
-# Enable slow tests by default  
-export RUN_SLOW_TESTS=true
-
-# Set GitHub token for API tests
-export GITHUB_TOKEN=your_token_here
+GITHUB_TOKEN=your_token python test_all.py --integration
 ```
 
 ### Environment Variables
@@ -333,214 +247,4 @@ python -m unittest test_all.TestUtilityFunctions
 
 # Run a specific test method
 python -m unittest test_all.TestUtilityFunctions.test_safe_file_read
-```
-
-## Unified Test Runner Architecture
-
-The unified test runner provides a seamless way to execute both test frameworks:
-
-### Core Components
-
-1. **test_runner_core.py**: Abstract base class and common functionality
-   - `TestRunner` ABC for framework-agnostic interface
-   - `TestResults` dataclass for unified result format
-   - Result aggregation and formatting methods
-
-2. **test_runner_config.py**: Configuration management
-   - `TestConfig` dataclass with all test execution options
-   - Environment variable support
-   - CLI argument integration
-
-3. **unittest_integration.py**: Unittest framework adapter
-   - `UnittestRunner` class implementing TestRunner interface
-   - Custom result collector for detailed test tracking
-   - Integration with existing test_all.py infrastructure
-
-4. **pytest_integration.py**: Pytest framework adapter
-   - `PytestRunner` class for pytest execution
-   - Snapshot testing support
-   - Parallel execution capabilities
-
-5. **test_runner_utils.py**: Shared utilities
-   - Test discovery functions
-   - Result aggregation
-   - Progress tracking with Rich
-   - Output formatting (Rich, plain, JSON)
-
-6. **run_all_tests.py**: Main entry point
-   - CLI argument parsing
-   - Framework orchestration
-   - Unified reporting
-
-### Test Runner Tests
-
-The test runner itself has comprehensive test coverage in `test_runner_tests.py`:
-- Configuration validation and defaults
-- Result aggregation and formatting
-- Framework runner functionality
-- CLI argument parsing
-- Integration testing
-- Performance benchmarks
-
-## CI/CD Integration
-
-### GitHub Actions Example
-
-```yaml
-name: Test Suite
-
-on: [push, pull_request]
-
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    
-    steps:
-    - uses: actions/checkout@v3
-    
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
-    
-    - name: Install dependencies
-      run: |
-        pip install -r requirements.txt
-        pip install -r requirements-test.txt
-    
-    - name: Run all tests
-      run: python tests/run_all_tests.py --output-format plain
-      
-    - name: Run tests with coverage
-      run: |
-        coverage run tests/run_all_tests.py
-        coverage xml
-      
-    - name: Upload coverage
-      uses: codecov/codecov-action@v3
-```
-
-### Jenkins Pipeline Example
-
-```groovy
-pipeline {
-    agent any
-    
-    stages {
-        stage('Setup') {
-            steps {
-                sh 'pip install -r requirements.txt'
-                sh 'pip install -r requirements-test.txt'
-            }
-        }
-        
-        stage('Unit Tests') {
-            steps {
-                sh 'python tests/run_all_tests.py --framework unittest --output-format junit > unittest-results.xml'
-            }
-        }
-        
-        stage('Integration Tests') {
-            when {
-                branch 'main'
-            }
-            steps {
-                withCredentials([string(credentialsId: 'github-token', variable: 'GITHUB_TOKEN')]) {
-                    sh 'python tests/run_all_tests.py --integration --output-format junit > integration-results.xml'
-                }
-            }
-        }
-        
-        stage('Recorded Tests') {
-            steps {
-                sh 'python tests/run_all_tests.py --framework pytest --output-format junit > pytest-results.xml'
-            }
-        }
-    }
-    
-    post {
-        always {
-            junit '*-results.xml'
-        }
-    }
-}
-```
-
-### GitLab CI Example
-
-```yaml
-test:
-  stage: test
-  script:
-    - pip install -r requirements.txt
-    - pip install -r requirements-test.txt
-    - python tests/run_all_tests.py --output-format plain
-  artifacts:
-    reports:
-      junit: test-results.xml
-    expire_in: 1 week
-
-test:integration:
-  stage: test
-  script:
-    - pip install -r requirements.txt
-    - pip install -r requirements-test.txt
-    - python tests/run_all_tests.py --integration --slow
-  only:
-    - main
-  variables:
-    GITHUB_TOKEN: $GITHUB_TOKEN
-```
-
-## Test Dependencies
-
-Install test-specific dependencies:
-
-```bash
-pip install -r requirements-test.txt
-```
-
-Contents of `requirements-test.txt`:
-```
-pytest>=7.0.0
-pytest-snapshot>=0.9.0
-pytest-xdist>=3.0.0  # For parallel execution
-pytest-timeout>=2.0.0
-pytest-mock>=3.0.0
-coverage>=7.0.0
-```
-
-## Migration Guide
-
-### From Individual Test Runners to Unified Runner
-
-Before:
-```bash
-# Run unittest tests
-python tests/test_all.py --integration
-
-# Run pytest tests separately
-pytest tests/test_recorded_*.py
-```
-
-After:
-```bash
-# Run both test suites
-python tests/run_all_tests.py --integration
-```
-
-### Custom Test Scripts
-
-If you have custom test scripts, update them to use the unified runner:
-
-```python
-# Old approach
-import subprocess
-subprocess.run(['python', 'test_all.py'])
-subprocess.run(['pytest', 'tests/'])
-
-# New approach
-import subprocess
-result = subprocess.run(['python', 'tests/run_all_tests.py'], capture_output=True)
-print(f"Tests {'passed' if result.returncode == 0 else 'failed'}")
 ```

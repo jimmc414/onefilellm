@@ -23,161 +23,46 @@ from rich.text import Text
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Use the compatibility package
-import onefilellm_compat as onefilellm
+# Import the modules we're testing
+from onefilellm import (
+    process_github_repo,
+    process_arxiv_pdf,
+    process_local_folder,
+    fetch_youtube_transcript,
+    crawl_and_extract_text,
+    process_doi_or_pmid,
+    process_github_pull_request,
+    process_github_issue,
+    excel_to_markdown,
+    process_input,
+    process_text_stream,
+    get_token_count,
+    combine_xml_outputs,
+    preprocess_text,
+    ensure_alias_dir_exists,
+    ENABLE_COMPRESSION_AND_NLTK,
+    TOKEN_ESTIMATE_MULTIPLIER
+)
 
-# Import the fixed detect_text_format for tests
-from test_utils_compat import detect_text_format
-
-# Import process_text_stream from compatibility layer
-from test_compatibility import process_text_stream
-
-# Import read functions from utils
-from utils import read_from_stdin, read_from_clipboard
-
-# Import the modules we're testing through compatibility layer
-# Core components
-from onefilellm_compat.core.processor_claude2 import CoreProcessor
-from onefilellm_compat.core.xml_builder_claude2 import combine_xml_outputs, create_source_element, create_file_element, create_error_element
-from onefilellm_compat.core.config import Configuration, CORE_ALIASES
-
-# Alias management
-from onefilellm_compat.aliases.manager import AliasManager
-from onefilellm_compat.aliases.storage import ensure_alias_dir_exists, ALIAS_CONFIG_DIR, USER_ALIASES_PATH
-
-# Source processors
-from onefilellm_compat.sources.github_claude2 import GitHubRepoProcessor, GitHubPRProcessor, GitHubIssueProcessor
-from onefilellm_compat.sources.academic_claude1 import ArXivProcessor, DOIProcessor, PMIDProcessor, process_pdf_content_from_path
-from onefilellm import process_arxiv_pdf
-from onefilellm_compat.sources.local_claude2 import LocalFileProcessor, LocalFolderProcessor, safe_file_read, is_allowed_filetype, is_excluded_file, excel_to_markdown, process_ipynb_file
-from onefilellm_compat.sources.youtube_claude1 import YouTubeProcessor
-from onefilellm_compat.sources.stream_claude1 import StdinProcessor, ClipboardProcessor, StringProcessor
-
-# Web crawling
-from onefilellm_compat.crawlers.web_processor_claude3 import WebContentProcessor, crawl_and_extract_text
-from onefilellm_compat.crawlers.async_crawler_claude3 import AsyncWebCrawler
-
-# Utilities (many moved to local_claude2.py)
-from onefilellm_compat.sources.local_claude2 import get_file_extension, is_binary_file
-
-# Constants
-from onefilellm_compat import ENABLE_COMPRESSION_AND_NLTK, TOKEN_ESTIMATE_MULTIPLIER
-
-# Compatibility functions for old API
-def process_github_repo(repo_url, github_token=None):
-    """Compatibility wrapper for GitHubRepoProcessor"""
-    processor = GitHubRepoProcessor()
-    result = processor.process(repo_url, context={'github_token': github_token})
-    return result
-
-def process_local_folder(folder_path):
-    """Compatibility wrapper for LocalFolderProcessor"""
-    processor = LocalFolderProcessor()
-    result = processor.process(folder_path, context={})
-    return result
-
-def fetch_youtube_transcript(video_url):
-    """Compatibility wrapper for YouTubeProcessor"""
-    processor = YouTubeProcessor()
-    result = processor.process(video_url, context={})
-    return result
-
-# Commented out - using synchronous import from web_processor_claude3 instead
-# async def crawl_and_extract_text(url, **kwargs):
-#     """Compatibility wrapper for web crawling"""
-#     processor = WebContentProcessor()
-#     result = await processor.process_async(url, context=kwargs)
-#     return result
-
-def process_doi_or_pmid(identifier):
-    """Compatibility wrapper for DOI/PMID processing"""
-    if identifier.startswith('10.'):
-        processor = DOIProcessor()
-    else:
-        processor = PMIDProcessor()
-    result = processor.process(identifier, context={})
-    return result
-
-def process_github_pull_request(pr_url, github_token=None):
-    """Compatibility wrapper for GitHubPRProcessor"""
-    processor = GitHubPRProcessor()
-    result = processor.process(pr_url, context={'github_token': github_token})
-    return result
-
-def process_github_issue(issue_url, github_token=None):
-    """Compatibility wrapper for GitHubIssueProcessor"""
-    processor = GitHubIssueProcessor()
-    result = processor.process(issue_url, context={'github_token': github_token})
-    return result
-
-async def process_input(input_source, **kwargs):
-    """Compatibility wrapper for generic input processing"""
-    core_processor = CoreProcessor()
-    results = await core_processor.process_sources([input_source], context=kwargs)
-    return results[0] if results else None
-
-# Commented out - using import from test_compatibility instead
-# def process_text_stream(text, source_type="text"):
-#     """Compatibility wrapper for text stream processing"""
-#     processor = StringProcessor()
-#     result = processor.process(text, context={'source_type': source_type})
-#     return result
-
-# Import the real functions from onefilellm module
-from onefilellm import get_token_count, preprocess_text
-
-# Text parsing utilities
-# Commented out - using imports from utils instead
-# def read_from_clipboard():
-#     """Read content from clipboard"""
-#     try:
-#         return pyperclip.paste()
-#     except:
-#         return None
-
-# def read_from_stdin():
-#     """Read content from stdin"""
-#     if not sys.stdin.isatty():
-#         return sys.stdin.read()
-#     return None
-
-# Commented out - using import from test_utils_compat instead
-# detect_text_format is imported at the top of the file
-
-# Import parse functions from utils
-from utils import parse_as_plaintext, parse_as_markdown, parse_as_json, parse_as_html, parse_as_yaml
-
-def download_file(url, dest_path):
-    """Download file from URL"""
-    import requests
-    response = requests.get(url)
-    with open(dest_path, 'wb') as f:
-        f.write(response.content)
-    return dest_path
-
-def is_same_domain(url1, url2):
-    """Check if two URLs are from the same domain"""
-    from urllib.parse import urlparse
-    domain1 = urlparse(url1).netloc
-    domain2 = urlparse(url2).netloc
-    return domain1 == domain2
-
-def is_within_depth(base_url, url, max_depth):
-    """Check if URL is within max depth from base URL"""
-    from urllib.parse import urlparse
-    base_path = urlparse(base_url).path.rstrip('/').split('/')
-    url_path = urlparse(url).path.rstrip('/').split('/')
-    
-    # Must be under base path
-    if not url_path[:len(base_path)] == base_path:
-        return False
-    
-    depth = len(url_path) - len(base_path)
-    return depth <= max_depth
-
-def escape_xml(text):
-    """Escape XML special characters (currently returns unchanged)"""
-    return text  # Per the codebase, XML is not escaped for LLM readability
+from utils import (
+    safe_file_read,
+    read_from_clipboard,
+    read_from_stdin,
+    detect_text_format,
+    parse_as_plaintext,
+    parse_as_markdown,
+    parse_as_json,
+    parse_as_html,
+    parse_as_yaml,
+    download_file,
+    is_same_domain,
+    is_within_depth,
+    is_excluded_file,
+    is_allowed_filetype,
+    escape_xml,
+    get_file_extension,
+    is_binary_file
+)
 
 # Test configuration
 GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN')
@@ -539,123 +424,114 @@ class TestAliasSystem2OLD(unittest.TestCase):
         self.temp_alias_dir = tempfile.mkdtemp()
         self.original_alias_dir = Path.home() / ".onefilellm_aliases"
         # Mock the alias directory for testing
-        self.patcher = patch('onefilellm.ALIAS_CONFIG_DIR', Path(self.temp_alias_dir))
+        self.patcher = patch('onefilellm.ALIAS_DIR', Path(self.temp_alias_dir))
         self.patcher.start()
-        self.user_aliases_patcher = patch('onefilellm.USER_ALIASES_PATH', Path(self.temp_alias_dir) / "aliases.json")
-        self.user_aliases_patcher.start()
         
     def tearDown(self):
         self.patcher.stop()
-        self.user_aliases_patcher.stop()
         shutil.rmtree(self.temp_alias_dir)
     
-    def test_alias_validation(self):
-        """Test alias name validation"""
-        console = Console()
-        manager = AliasManager(console, CORE_ALIASES, Path(self.temp_alias_dir) / "aliases.json")
+    def test_alias_detection(self):
+        """Test alias detection logic"""
+        # Should be detected as potential aliases
+        self.assertTrue(is_potential_alias("myalias"))
+        self.assertTrue(is_potential_alias("my_alias_123"))
         
-        # Should be valid alias names
-        self.assertTrue(manager._is_valid_alias_name("myalias"))
-        self.assertTrue(manager._is_valid_alias_name("my_alias_123"))
-        self.assertTrue(manager._is_valid_alias_name("my-alias"))
-        
-        # Should NOT be valid alias names
-        self.assertFalse(manager._is_valid_alias_name("https://example.com"))
-        self.assertFalse(manager._is_valid_alias_name("/path/to/file"))
-        self.assertFalse(manager._is_valid_alias_name("--flag"))
-        self.assertFalse(manager._is_valid_alias_name(""))
+        # Should NOT be detected as aliases
+        self.assertFalse(is_potential_alias("https://example.com"))
+        self.assertFalse(is_potential_alias("/path/to/file"))
+        self.assertFalse(is_potential_alias("C:\\Windows\\file"))
+        self.assertFalse(is_potential_alias("10.1234/doi"))
     
     def test_alias_directory_creation(self):
         """Test alias directory creation"""
         ensure_alias_dir_exists()
-        # Check the mocked directory, not the real one
-        self.assertTrue(Path(self.temp_alias_dir).exists())
-        self.assertTrue(Path(self.temp_alias_dir).is_dir())
+        alias_dir = Path.home() / ".onefilellm_aliases"
+        self.assertTrue(alias_dir.exists())
+        self.assertTrue(alias_dir.is_dir())
     
     def test_handle_add_alias(self):
-        """Test creating aliases with AliasManager"""
-        console = Console()
-        manager = AliasManager(console, CORE_ALIASES, Path(self.temp_alias_dir) / "aliases.json")
+        """Test creating aliases with --add-alias"""
+        from onefilellm import handle_add_alias
+        from rich.console import Console
         
-        # Test successful alias creation with multiple sources
-        alias_name = "mytest"
-        command_string = "https://github.com/user/repo https://example.com"
-        result = manager.add_or_update_alias(alias_name, command_string)
+        console = Console()
+        
+        # Test successful alias creation
+        args = ["--add-alias", "mytest", "https://github.com/user/repo", "https://example.com"]
+        result = handle_add_alias(args, console)
         self.assertTrue(result)
         
-        # Verify alias was saved to JSON file
-        aliases_file = Path(self.temp_alias_dir) / "aliases.json"
-        self.assertTrue(aliases_file.exists())
+        # Verify alias file was created
+        alias_file = Path(self.temp_alias_dir) / "mytest"
+        self.assertTrue(alias_file.exists())
         
         # Verify contents
-        with open(aliases_file, 'r') as f:
-            data = json.load(f)
-            self.assertIn(alias_name, data)
-            self.assertEqual(data[alias_name], command_string)
+        with open(alias_file, 'r') as f:
+            contents = f.read()
+            self.assertIn("https://github.com/user/repo", contents)
+            self.assertIn("https://example.com", contents)
     
     def test_handle_alias_from_clipboard(self):
-        """Test creating aliases from clipboard content using AliasManager"""
+        """Test creating aliases from clipboard content"""
+        from onefilellm import handle_alias_from_clipboard
+        from rich.console import Console
+        
         console = Console()
-        manager = AliasManager(console, CORE_ALIASES, Path(self.temp_alias_dir) / "aliases.json")
         
-        # Mock clipboard content - simulate what would be parsed from clipboard
-        test_urls = "https://github.com/repo1 https://example.com/doc /local/path/file.txt"
-        alias_name = "cliptest"
-        
-        # Add alias (simulating what the CLI would do after parsing clipboard)
-        result = manager.add_or_update_alias(alias_name, test_urls)
-        self.assertTrue(result)
-        
-        # Verify alias was saved
-        aliases_file = Path(self.temp_alias_dir) / "aliases.json"
-        self.assertTrue(aliases_file.exists())
-        
-        # Verify contents
-        with open(aliases_file, 'r') as f:
-            data = json.load(f)
-            self.assertIn(alias_name, data)
-            stored_command = data[alias_name]
-            self.assertIn("https://github.com/repo1", stored_command)
-            self.assertIn("https://example.com/doc", stored_command)
-            self.assertIn("/local/path/file.txt", stored_command)
+        # Mock clipboard content
+        test_urls = "https://github.com/repo1\nhttps://example.com/doc\n/local/path/file.txt"
+        with patch('pyperclip.paste', return_value=test_urls):
+            args = ["--alias-from-clipboard", "cliptest"]
+            result = handle_alias_from_clipboard(args, console)
+            self.assertTrue(result)
+            
+            # Verify alias file was created
+            alias_file = Path(self.temp_alias_dir) / "cliptest"
+            self.assertTrue(alias_file.exists())
+            
+            # Verify contents
+            with open(alias_file, 'r') as f:
+                contents = f.read()
+                self.assertIn("https://github.com/repo1", contents)
+                self.assertIn("https://example.com/doc", contents)
+                self.assertIn("/local/path/file.txt", contents)
     
     def test_load_alias(self):
-        """Test loading and resolving aliases with AliasManager"""
-        console = Console()
-        manager = AliasManager(console, CORE_ALIASES, Path(self.temp_alias_dir) / "aliases.json")
+        """Test loading and resolving aliases"""
+        from onefilellm import load_alias
+        from rich.console import Console
         
-        # Create a test alias
+        console = Console()
+        
+        # Create a test alias file
         alias_name = "testalias"
-        test_command = "https://github.com/test/repo https://example.com/page"
+        alias_file = Path(self.temp_alias_dir) / alias_name
+        test_targets = ["https://github.com/test/repo", "https://example.com/page"]
+        with open(alias_file, 'w') as f:
+            for target in test_targets:
+                f.write(target + "\n")
         
-        # Add the alias
-        manager.add_or_update_alias(alias_name, test_command)
-        
-        # Load aliases and retrieve the command
-        manager.load_aliases()
-        loaded_command = manager.get_command(alias_name)
-        
-        # Verify the command was loaded correctly
-        self.assertEqual(loaded_command, test_command)
+        # Test loading the alias
+        loaded_targets = load_alias(alias_name, console)
+        self.assertEqual(loaded_targets, test_targets)
     
-    def test_alias_name_validation_errors(self):
-        """Test alias name validation with invalid names"""
+    def test_alias_validation(self):
+        """Test alias name validation"""
+        from onefilellm import handle_add_alias
+        from rich.console import Console
+        
         console = Console()
-        manager = AliasManager(console, CORE_ALIASES, Path(self.temp_alias_dir) / "aliases.json")
         
         # Test invalid alias names
-        invalid_names = ["test/alias", "test\\alias", "test.alias", "test:alias", "test alias", ""]
+        invalid_names = ["test/alias", "test\\alias", "test.alias", "test:alias"]
         for invalid_name in invalid_names:
-            result = manager.add_or_update_alias(invalid_name, "https://example.com")
-            self.assertFalse(result)  # Should return False for invalid names
-            
-        # Verify no aliases were created
-        aliases_file = Path(self.temp_alias_dir) / "aliases.json"
-        if aliases_file.exists():
-            with open(aliases_file, 'r') as f:
-                data = json.load(f)
-                for invalid_name in invalid_names:
-                    self.assertNotIn(invalid_name, data)
+            args = ["--add-alias", invalid_name, "https://example.com"]
+            result = handle_add_alias(args, console)
+            self.assertTrue(result)  # Should return True indicating error
+            # Verify no file was created
+            alias_file = Path(self.temp_alias_dir) / invalid_name
+            self.assertFalse(alias_file.exists())
 
 
 class TestAliasSystem2(unittest.TestCase):
@@ -1417,8 +1293,6 @@ class TestAdvancedAliasFeatures(unittest.TestCase):
 class TestIntegration(unittest.TestCase):
     """Integration tests for external services"""
     
-    @unittest.skipIf(not os.getenv('GITHUB_TOKEN'), 
-                     "Skipping GitHub integration test: GITHUB_TOKEN not set (may cause rate limit errors)")
     def test_github_repo_integration(self):
         """Test GitHub repository processing"""
         repo_url = "https://github.com/jimmc414/onefilellm"
@@ -1485,10 +1359,7 @@ class TestCLIFunctionality(unittest.TestCase):
     
     def run_cli(self, args, input_text=None):
         """Helper to run CLI commands"""
-        # Get the path to onefilellm.py in the parent directory
-        test_dir = os.path.dirname(os.path.abspath(__file__))
-        script_path = os.path.join(os.path.dirname(test_dir), "onefilellm.py")
-        cmd = [sys.executable, script_path] + args
+        cmd = [sys.executable, "onefilellm.py"] + args
         process = subprocess.Popen(
             cmd,
             stdin=subprocess.PIPE if input_text else None,
