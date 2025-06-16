@@ -1,0 +1,46 @@
+STDOUT:
+╭───────────── onefilellm - Content Aggregator ──────────────╮
+│                                                            │
+│                                                            │
+│ Processes Inputs and Wraps Content in XML:                 │
+│                                                            │
+│ • Local folder path                                        │
+│ • GitHub repository URL                                    │
+│ • GitHub pull request URL (PR + Repo)                      │
+│ • GitHub issue URL (Issue + Repo)                          │
+│ • Documentation URL (Web Crawl)                            │
+│ • YouTube video URL (Transcript)                           │
+│ • ArXiv Paper URL (PDF Text)                               │
+│ • DOI or PMID (via Sci-Hub, best effort)                   │
+│ • Text from stdin (e.g., `cat file.txt | onefilellm -`)    │
+│ • Text from clipboard (e.g., `onefilellm --clipboard`)     │
+│                                                            │
+│ Output is saved to file and copied to clipboard.           │
+│ Content within XML tags remains unescaped for readability. │
+│ Multiple inputs can be provided as command line arguments. │
+│                                                            │
+╰────────────────────────────────────────────────────────────╯
+
+Processing: https://github.com/modelcontextprotocol/python-sdk
+
+Error fetching directory 
+https://api.github.com/repos/modelcontextprotocol/python-sdk/contents: 403 
+Client Error: rate limit exceeded for url: 
+https://api.github.com/repos/modelcontextprotocol/python-sdk/contents
+GitHub repository processing finished.
+Successfully processed: https://github.com/modelcontextprotocol/python-sdk
+
+Writing output to output.xml...
+Output written successfully.
+
+Summary:
+  - Sources Processed: 1
+  - Final Output Size: 0.36 KB
+
+Content Token Count (tiktoken): 44
+Estimated Model Token Count (incl. overhead): 60
+
+output.xml (main XML) has been created.
+
+The contents of output.xml have been copied to the clipboard.
+Processing inputs... ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% • 1/1 sources • 0:00:00

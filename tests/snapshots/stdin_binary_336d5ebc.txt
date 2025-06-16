@@ -1,0 +1,24 @@
+STDOUT:
+Reading from standard input...
+Detected format: text
+
+Writing output to output.xml...
+
+STDERR:
+Traceback (most recent call last):
+  File "/mnt/c/python/onefilellm/onefilellm.py", line 3719, in <module>
+    asyncio.run(main())
+  File "/home/jim/miniconda3/envs/llm/lib/python3.11/asyncio/runners.py", line 190, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "/home/jim/miniconda3/envs/llm/lib/python3.11/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jim/miniconda3/envs/llm/lib/python3.11/asyncio/base_events.py", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/mnt/c/python/onefilellm/onefilellm.py", line 3513, in main
+    file.write(final_combined_output)
+UnicodeEncodeError: 'utf-8' codec can't encode characters in position 79-80: surrogates not allowed
+
+EXIT_CODE: 1

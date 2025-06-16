@@ -1,0 +1,153 @@
+STDOUT:
+╭──────────────────────────────────────────────────────────────────────────────╮
+│                                                                              │
+│  ALIAS SYSTEM 2.0                                                            │
+│  JSON-based shortcuts for massive multi-source workflows                     │
+│                                                                              │
+│  🎯 BASIC ALIAS CREATION                                                     │
+│    # Simple single-source aliases                                            │
+│    python onefilellm.py --alias-add mcp "https://github.com/anthropics/mcp"  │
+│    python onefilellm.py --alias-add docs "https://docs.python.org/3/"        │
+│    python onefilellm.py --alias-add notes "project_notes.md"                 │
+│                                                                              │
+│    # Multi-source aliases (space-separated)                                  │
+│    python onefilellm.py --alias-add react-stack \                            │
+│      "https://github.com/facebook/react https://reactjs.org/docs/            │
+│  https://github.com/vercel/next.js"                                          │
+│                                                                              │
+│  🔍 DYNAMIC PLACEHOLDERS                                                     │
+│    # Create searchable aliases with {} tokens                                │
+│    python onefilellm.py --alias-add gh-search                                │
+│  "https://github.com/search?q={}"                                            │
+│    python onefilellm.py --alias-add arxiv-search                             │
+│  "https://arxiv.org/search/?query={}"                                        │
+│    python onefilellm.py --alias-add gh-user "https://github.com/{}"          │
+│    python onefilellm.py --alias-add docs-search                              │
+│  "https://docs.python.org/3/search.html?q={}"                                │
+│                                                                              │
+│    # Use placeholders dynamically                                            │
+│    python onefilellm.py gh-search "machine learning transformers"            │
+│    python onefilellm.py arxiv-search "attention mechanisms"                  │
+│    python onefilellm.py gh-user "microsoft"                                  │
+│    python onefilellm.py docs-search "asyncio"                                │
+│                                                                              │
+│  🏗️ COMPREHENSIVE ECOSYSTEM ALIASES                                           │
+│    # Modern web development stack (300K+ tokens)                             │
+│    python onefilellm.py --alias-add modern-web \                             │
+│      "https://github.com/facebook/react https://github.com/vercel/next.js    │
+│  https://github.com/tailwindlabs/tailwindcss                                 │
+│  https://github.com/prisma/prisma https://reactjs.org/docs/                  │
+│  https://nextjs.org/docs https://tailwindcss.com/docs                        │
+│  https://www.prisma.io/docs"                                                 │
+│                                                                              │
+│    # AI/ML research ecosystem (600K+ tokens)                                 │
+│    python onefilellm.py --alias-add ai-research \                            │
+│      "arxiv:1706.03762 arxiv:2005.14165 10.1038/s41586-021-03819-2           │
+│  https://github.com/huggingface/transformers                                 │
+│  https://github.com/openai/whisper https://github.com/pytorch/pytorch        │
+│  https://huggingface.co/docs https://pytorch.org/docs                        │
+│  https://openai.com/research"                                                │
+│                                                                              │
+│    # Cloud native ecosystem (900K+ tokens)                                   │
+│    python onefilellm.py --alias-add k8s-ecosystem \                          │
+│      "https://github.com/kubernetes/kubernetes                               │
+│  https://github.com/kubernetes/enhancements https://kubernetes.io/docs/      │
+│  https://github.com/istio/istio https://github.com/prometheus/prometheus     │
+│  https://github.com/envoyproxy/envoy https://istio.io/latest/docs/           │
+│  https://prometheus.io/docs/"                                                │
+│                                                                              │
+│    # Security research and tools (400K+ tokens)                              │
+│    python onefilellm.py --alias-add security-stack \                         │
+│      "https://github.com/OWASP/Top10 https://github.com/aquasecurity/trivy   │
+│  https://github.com/falcosecurity/falco                                      │
+│  https://owasp.org/www-project-top-ten/ https://aquasec.com/trivy/           │
+│  https://falco.org/docs/"                                                    │
+│                                                                              │
+│  📊 SPECIALIZED DOMAIN ALIASES                                               │
+│    # Data science and analytics                                              │
+│    python onefilellm.py --alias-add data-science \                           │
+│      "https://github.com/pandas-dev/pandas https://github.com/numpy/numpy    │
+│  https://github.com/scikit-learn/scikit-learn                                │
+│  https://pandas.pydata.org/docs/ https://numpy.org/doc/                      │
+│  https://scikit-learn.org/stable/"                                           │
+│                                                                              │
+│    # DevOps and infrastructure                                               │
+│    python onefilellm.py --alias-add devops-tools \                           │
+│      "https://github.com/hashicorp/terraform                                 │
+│  https://github.com/ansible/ansible https://github.com/docker/docker         │
+│  https://terraform.io/docs https://docs.ansible.com/                         │
+│  https://docs.docker.com/"                                                   │
+│                                                                              │
+│    # Blockchain and crypto research                                          │
+│    python onefilellm.py --alias-add crypto-research \                        │
+│      "https://github.com/ethereum/ethereum-org-website                       │
+│  https://github.com/bitcoin/bitcoin                                          │
+│  https://ethereum.org/en/developers/docs/                                    │
+│  https://bitcoin.org/en/developer-documentation"                             │
+│                                                                              │
+│  🧬 ACADEMIC AND RESEARCH ALIASES                                            │
+│    # NeurIPS 2024 conference collection                                      │
+│    python onefilellm.py --alias-add neurips-2024 \                           │
+│      "https://neurips.cc/virtual/2024 arxiv:2312.01234 arxiv:2311.05678      │
+│  PMID:38123456"                                                              │
+│                                                                              │
+│    # Protein folding research                                                │
+│    python onefilellm.py --alias-add protein-folding \                        │
+│      "https://github.com/deepmind/alphafold                                  │
+│  https://github.com/deepmind/alphafold3 10.1038/s41586-021-03819-2           │
+│  https://alphafold.ebi.ac.uk/help https://colabfold.mmseqs.com/"             │
+│                                                                              │
+│    # Climate science data                                                    │
+│    python onefilellm.py --alias-add climate-research \                       │
+│      "https://github.com/NCAR/cesm https://www.ipcc.ch/reports/              │
+│  https://climate.nasa.gov/evidence/ doi:10.1038/s41467-021-24487-w"          │
+│                                                                              │
+│  💼 BUSINESS AND INDUSTRY ALIASES                                            │
+│    # Fintech and banking APIs                                                │
+│    python onefilellm.py --alias-add fintech-apis \                           │
+│      "https://github.com/stripe/stripe-python https://docs.stripe.com/api    │
+│  https://developer.paypal.com/docs/api/ https://plaid.com/docs/"             │
+│                                                                              │
+│    # E-commerce platforms                                                    │
+│    python onefilellm.py --alias-add ecommerce-stack \                        │
+│      "https://github.com/shopify/shopify-api-js https://shopify.dev/docs     │
+│  https://woocommerce.com/documentation/                                      │
+│  https://magento.com/technical-resources"                                    │
+│                                                                              │
+│  🔗 COMPLEX ALIAS COMBINATIONS                                               │
+│    # Massive context aggregation (1.2M+ tokens)                              │
+│    python onefilellm.py modern-web ai-research k8s-ecosystem \               │
+│      https://github.com/microsoft/semantic-kernel \                          │
+│      https://github.com/vercel/ai \                                          │
+│      conference_notes_2024.pdf \                                             │
+│      local_research_projects/                                                │
+│                                                                              │
+│    # Multi-domain research synthesis                                         │
+│    python onefilellm.py ai-research protein-folding climate-research \       │
+│      "https://www.youtube.com/watch?v=kCc8FmEb1nY" \                         │
+│      interdisciplinary_notes.md                                              │
+│                                                                              │
+│  ⚙️  ALIAS MANAGEMENT COMMANDS                                                │
+│    python onefilellm.py --alias-list              # Show all aliases         │
+│    python onefilellm.py --alias-list-core         # Show core aliases only   │
+│    python onefilellm.py --alias-remove old-alias  # Remove user alias        │
+│    cat ~/.onefilellm_aliases/aliases.json         # View raw JSON            │
+│                                                                              │
+│  🚀 ADVANCED PIPELINE WORKFLOWS                                              │
+│    # Research analysis pipeline                                              │
+│    python onefilellm.py ai-research security-stack | \                       │
+│      llm -m claude-3-haiku "Extract security implications of AI systems" |   │
+│  \                                                                           │
+│      llm -m claude-3-sonnet "Identify vulnerabilities and mitigation         │
+│  strategies" | \                                                             │
+│      llm -m claude-3-opus "Generate comprehensive security framework"        │
+│                                                                              │
+│    # Market research synthesis                                               │
+│    python onefilellm.py fintech-apis ecommerce-stack modern-web | \          │
+│      llm -m gpt-4o "Analyze market trends and technical integration          │
+│  patterns" | \                                                               │
+│      tee market_analysis.md | \                                              │
+│      llm -m claude-3-opus "Generate business strategy recommendations"       │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯

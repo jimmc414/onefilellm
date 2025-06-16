@@ -1,0 +1,11 @@
+STDOUT:
+Reading from standard input...
+Detected format: html
+
+Writing output to output.xml...
+Output written successfully.
+
+Content Token Count (tiktoken): 4,177
+Estimated Model Token Count (incl. overhead): 5,722
+
+The contents of output.xml have been copied to the clipboard.

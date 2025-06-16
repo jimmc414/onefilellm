@@ -1,0 +1,67 @@
+STDOUT:
+╭───────────── onefilellm - Content Aggregator ──────────────╮
+│                                                            │
+│                                                            │
+│ Processes Inputs and Wraps Content in XML:                 │
+│                                                            │
+│ • Local folder path                                        │
+│ • GitHub repository URL                                    │
+│ • GitHub pull request URL (PR + Repo)                      │
+│ • GitHub issue URL (Issue + Repo)                          │
+│ • Documentation URL (Web Crawl)                            │
+│ • YouTube video URL (Transcript)                           │
+│ • ArXiv Paper URL (PDF Text)                               │
+│ • DOI or PMID (via Sci-Hub, best effort)                   │
+│ • Text from stdin (e.g., `cat file.txt | onefilellm -`)    │
+│ • Text from clipboard (e.g., `onefilellm --clipboard`)     │
+│                                                            │
+│ Output is saved to file and copied to clipboard.           │
+│ Content within XML tags remains unescaped for readability. │
+│ Multiple inputs can be provided as command line arguments. │
+│                                                            │
+╰────────────────────────────────────────────────────────────╯
+
+Processing: https://github.com/pytorch/pytorch/pull/80000
+
+Fetching PR data for: https://github.com/pytorch/pytorch/pull/80000
+Fetching PR diff...
+Fetching PR comments...
+Fetching PR review comments...
+Fetching associated repository content from: https://github.com/pytorch/pytorch
+Error fetching directory 
+https://api.github.com/repos/pytorch/pytorch/contents/awgu/58/base?ref=gh: 404 
+Client Error: Not Found for url: 
+https://api.github.com/repos/pytorch/pytorch/contents/awgu/58/base?ref=gh
+GitHub repository processing finished.
+Pull request 80000 and repository content processed successfully.
+Successfully processed: https://github.com/pytorch/pytorch/pull/80000
+
+Processing: https://github.com/pytorch/pytorch/pull/80001
+
+Fetching PR data for: https://github.com/pytorch/pytorch/pull/80001
+Fetching PR diff...
+Fetching PR comments...
+Fetching PR review comments...
+Fetching associated repository content from: https://github.com/pytorch/pytorch
+Error fetching directory 
+https://api.github.com/repos/pytorch/pytorch/contents?ref=master: 404 Client 
+Error: Not Found for url: 
+https://api.github.com/repos/pytorch/pytorch/contents?ref=master
+GitHub repository processing finished.
+Pull request 80001 and repository content processed successfully.
+Successfully processed: https://github.com/pytorch/pytorch/pull/80001
+
+Writing output to output.xml...
+Output written successfully.
+
+Summary:
+  - Sources Processed: 2
+  - Final Output Size: 47.17 KB
+
+Content Token Count (tiktoken): 12,292
+Estimated Model Token Count (incl. overhead): 16,840
+
+output.xml (main XML) has been created.
+
+The contents of output.xml have been copied to the clipboard.
+Processing inputs... ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% • 2/2 sources • 0:00:00

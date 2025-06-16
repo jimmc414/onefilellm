@@ -1,0 +1,11 @@
+STDOUT:
+Reading from standard input...
+Processing input as json (user override).
+
+Writing output to output.xml...
+Output written successfully.
+
+Content Token Count (tiktoken): 8
+Estimated Model Token Count (incl. overhead): 11
+
+The contents of output.xml have been copied to the clipboard.

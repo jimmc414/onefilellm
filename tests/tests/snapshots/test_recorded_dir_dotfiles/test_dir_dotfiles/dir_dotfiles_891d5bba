@@ -1,0 +1,56 @@
+STDOUT:
+╭───────────── onefilellm - Content Aggregator ──────────────╮
+│                                                            │
+│                                                            │
+│ Processes Inputs and Wraps Content in XML:                 │
+│                                                            │
+│ • Local folder path                                        │
+│ • GitHub repository URL                                    │
+│ • GitHub pull request URL (PR + Repo)                      │
+│ • GitHub issue URL (Issue + Repo)                          │
+│ • Documentation URL (Web Crawl)                            │
+│ • YouTube video URL (Transcript)                           │
+│ • ArXiv Paper URL (PDF Text)                               │
+│ • DOI or PMID (via Sci-Hub, best effort)                   │
+│ • Text from stdin (e.g., `cat file.txt | onefilellm -`)    │
+│ • Text from clipboard (e.g., `onefilellm --clipboard`)     │
+│                                                            │
+│ Output is saved to file and copied to clipboard.           │
+│ Content within XML tags remains unescaped for readability. │
+│ Multiple inputs can be provided as command line arguments. │
+│                                                            │
+╰────────────────────────────────────────────────────────────╯
+
+Processing: .git/
+
+Processing .git/hooks/applypatch-msg.sample...
+Processing .git/hooks/commit-msg.sample...
+Processing .git/hooks/fsmonitor-watchman.sample...
+Processing .git/hooks/post-update.sample...
+Processing .git/hooks/pre-applypatch.sample...
+Processing .git/hooks/pre-commit.sample...
+Processing .git/hooks/pre-merge-commit.sample...
+Processing .git/hooks/pre-push.sample...
+Processing .git/hooks/pre-rebase.sample...
+Processing .git/hooks/pre-receive.sample...
+Processing .git/hooks/prepare-commit-msg.sample...
+Processing .git/hooks/push-to-checkout.sample...
+Processing .git/hooks/sendemail-validate.sample...
+Processing .git/hooks/update.sample...
+Local folder processing finished.
+Successfully processed: .git/
+
+Writing output to output.xml...
+Output written successfully.
+
+Summary:
+  - Sources Processed: 1
+  - Final Output Size: 26.01 KB
+
+Content Token Count (tiktoken): 5,960
+Estimated Model Token Count (incl. overhead): 8,165
+
+output.xml (main XML) has been created.
+
+The contents of output.xml have been copied to the clipboard.
+Processing inputs... ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% • 1/1 sources • 0:00:00

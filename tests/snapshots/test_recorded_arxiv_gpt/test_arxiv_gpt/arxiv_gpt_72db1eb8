@@ -1,0 +1,119 @@
+STDOUT:
+╭───────────── onefilellm - Content Aggregator ──────────────╮
+│                                                            │
+│                                                            │
+│ Processes Inputs and Wraps Content in XML:                 │
+│                                                            │
+│ • Local folder path                                        │
+│ • GitHub repository URL                                    │
+│ • GitHub pull request URL (PR + Repo)                      │
+│ • GitHub issue URL (Issue + Repo)                          │
+│ • Documentation URL (Web Crawl)                            │
+│ • YouTube video URL (Transcript)                           │
+│ • ArXiv Paper URL (PDF Text)                               │
+│ • DOI or PMID (via Sci-Hub, best effort)                   │
+│ • Text from stdin (e.g., `cat file.txt | onefilellm -`)    │
+│ • Text from clipboard (e.g., `onefilellm --clipboard`)     │
+│                                                            │
+│ Output is saved to file and copied to clipboard.           │
+│ Content within XML tags remains unescaped for readability. │
+│ Multiple inputs can be provided as command line arguments. │
+│                                                            │
+╰────────────────────────────────────────────────────────────╯
+
+Processing: https://arxiv.org/abs/2005.14165
+
+Downloading ArXiv PDF from https://arxiv.org/pdf/2005.14165.pdf...
+Extracting text from PDF...
+  Processing page 1/75
+  Processing page 2/75
+  Processing page 3/75
+  Processing page 4/75
+  Processing page 5/75
+  Processing page 6/75
+  Processing page 7/75
+  Processing page 8/75
+  Processing page 9/75
+  Processing page 10/75
+  Processing page 11/75
+  Processing page 12/75
+  Processing page 13/75
+  Processing page 14/75
+  Processing page 15/75
+  Processing page 16/75
+  Processing page 17/75
+  Processing page 18/75
+  Processing page 19/75
+  Processing page 20/75
+  Processing page 21/75
+  Processing page 22/75
+  Processing page 23/75
+  Processing page 24/75
+  Processing page 25/75
+  Processing page 26/75
+  Processing page 27/75
+  Processing page 28/75
+  Processing page 29/75
+  Processing page 30/75
+  Processing page 31/75
+  Processing page 32/75
+  Processing page 33/75
+  Processing page 34/75
+  Processing page 35/75
+  Processing page 36/75
+  Processing page 37/75
+  Processing page 38/75
+  Processing page 39/75
+  Processing page 40/75
+  Processing page 41/75
+  Processing page 42/75
+  Processing page 43/75
+  Processing page 44/75
+  Processing page 45/75
+  Processing page 46/75
+  Processing page 47/75
+  Processing page 48/75
+  Processing page 49/75
+  Processing page 50/75
+  Processing page 51/75
+  Processing page 52/75
+  Processing page 53/75
+  Processing page 54/75
+  Processing page 55/75
+  Processing page 56/75
+  Processing page 57/75
+  Processing page 58/75
+  Processing page 59/75
+  Processing page 60/75
+  Processing page 61/75
+  Processing page 62/75
+  Processing page 63/75
+  Processing page 64/75
+  Processing page 65/75
+  Processing page 66/75
+  Processing page 67/75
+  Processing page 68/75
+  Processing page 69/75
+  Processing page 70/75
+  Processing page 71/75
+  Processing page 72/75
+  Processing page 73/75
+  Processing page 74/75
+  Processing page 75/75
+ArXiv paper processed successfully.
+Successfully processed: https://arxiv.org/abs/2005.14165
+
+Writing output to output.xml...
+Output written successfully.
+
+Summary:
+  - Sources Processed: 1
+  - Final Output Size: 245.80 KB
+
+Content Token Count (tiktoken): 71,925
+Estimated Model Token Count (incl. overhead): 98,537
+
+output.xml (main XML) has been created.
+
+The contents of output.xml have been copied to the clipboard.
+Processing inputs... ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% • 1/1 sources • 0:00:00

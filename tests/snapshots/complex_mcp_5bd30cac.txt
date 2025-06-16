@@ -1,0 +1,62 @@
+STDOUT:
+╭───────────── onefilellm - Content Aggregator ──────────────╮
+│                                                            │
+│                                                            │
+│ Processes Inputs and Wraps Content in XML:                 │
+│                                                            │
+│ • Local folder path                                        │
+│ • GitHub repository URL                                    │
+│ • GitHub pull request URL (PR + Repo)                      │
+│ • GitHub issue URL (Issue + Repo)                          │
+│ • Documentation URL (Web Crawl)                            │
+│ • YouTube video URL (Transcript)                           │
+│ • ArXiv Paper URL (PDF Text)                               │
+│ • DOI or PMID (via Sci-Hub, best effort)                   │
+│ • Text from stdin (e.g., `cat file.txt | onefilellm -`)    │
+│ • Text from clipboard (e.g., `onefilellm --clipboard`)     │
+│                                                            │
+│ Output is saved to file and copied to clipboard.           │
+│ Content within XML tags remains unescaped for readability. │
+│ Multiple inputs can be provided as command line arguments. │
+│                                                            │
+╰────────────────────────────────────────────────────────────╯
+
+Processing: https://modelcontextprotocol.io/llms-full.txt
+
+Processing direct file URL: https://modelcontextprotocol.io/llms-full.txt
+  Downloading and reading content from: 
+https://modelcontextprotocol.io/llms-full.txt
+Successfully processed: https://modelcontextprotocol.io/llms-full.txt
+
+Processing: https://github.com/modelcontextprotocol/python-sdk
+
+Error fetching directory 
+https://api.github.com/repos/modelcontextprotocol/python-sdk/contents: 401 
+Client Error: Unauthorized for url: 
+https://api.github.com/repos/modelcontextprotocol/python-sdk/contents
+GitHub repository processing finished.
+Successfully processed: https://github.com/modelcontextprotocol/python-sdk
+
+Processing: https://github.com/anthropics/anthropic-sdk-python
+
+Error fetching directory 
+https://api.github.com/repos/anthropics/anthropic-sdk-python/contents: 401 
+Client Error: Unauthorized for url: 
+https://api.github.com/repos/anthropics/anthropic-sdk-python/contents
+GitHub repository processing finished.
+Successfully processed: https://github.com/anthropics/anthropic-sdk-python
+
+Writing output to output.xml...
+Output written successfully.
+
+Summary:
+  - Sources Processed: 3
+  - Final Output Size: 606.41 KB
+
+Content Token Count (tiktoken): 133,006
+Estimated Model Token Count (incl. overhead): 182,218
+
+output.xml (main XML) has been created.
+
+The contents of output.xml have been copied to the clipboard.
+Processing inputs... ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% • 3/3 sources • 0:00:00

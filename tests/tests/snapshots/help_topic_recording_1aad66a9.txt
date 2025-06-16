@@ -1,0 +1,113 @@
+STDOUT:
+╭──────────────────────────────────────────────────────────────────────────────╮
+│                                                                              │
+│  TEST RECORDING SYSTEM                                                       │
+│  Automated pytest snapshot test generation from actual usage                 │
+│                                                                              │
+│  🎯 OVERVIEW                                                                 │
+│  The --record-test feature allows you to automatically generate pytest       │
+│  snapshot tests                                                              │
+│  by recording the actual execution of OneFileLLM commands. This creates      │
+│  reproducible                                                                │
+│  tests that verify consistent behavior across code changes.                  │
+│                                                                              │
+│  🚀 BASIC USAGE                                                              │
+│    # Record a simple file processing test                                    │
+│    python onefilellm.py --record-test simple-file test.txt                   │
+│                                                                              │
+│    # Record a help command test                                              │
+│    python onefilellm.py --record-test help-basic --help-topic basic          │
+│                                                                              │
+│    # Record a GitHub repository test                                         │
+│    python onefilellm.py --record-test github-repo                            │
+│  https://github.com/user/repo                                                │
+│                                                                              │
+│  📁 GENERATED FILES                                                          │
+│  When you use --record-test, two files are created:                          │
+│                                                                              │
+│  1. Test File: tests/test_recorded_<TEST_NAME>.py                            │
+│     - Contains the pytest test function                                      │
+│     - Uses the test harness for subprocess execution                         │
+│     - Compares output against the snapshot                                   │
+│                                                                              │
+│  2. Snapshot File: tests/snapshots/<TEST_NAME>_<HASH>.txt                    │
+│     - Contains the captured output (stdout + stderr)                         │
+│     - Includes exit codes if non-zero                                        │
+│     - Used for comparison in future test runs                                │
+│                                                                              │
+│  🔧 HOW IT WORKS                                                             │
+│  1. Argument Parsing: The --record-test flag is detected early               │
+│  2. Command Execution: Your command runs in a subprocess                     │
+│  3. Output Capture: All stdout, stderr, and exit codes are captured          │
+│  4. Test Generation: A pytest file is created with proper imports            │
+│  5. Snapshot Creation: Output is saved for future comparisons                │
+│                                                                              │
+│  ✅ RUNNING GENERATED TESTS                                                  │
+│    # Run a specific recorded test                                            │
+│    pytest tests/test_recorded_simple-file.py -v                              │
+│                                                                              │
+│    # Run all recorded tests                                                  │
+│    pytest tests/test_recorded_*.py -v                                        │
+│                                                                              │
+│    # Run with snapshot update (if output changed intentionally)              │
+│    pytest tests/test_recorded_*.py --snapshot-update                         │
+│                                                                              │
+│  💡 BEST PRACTICES                                                           │
+│  • Use descriptive test names that indicate what's being tested              │
+│  • Record tests for common use cases and edge cases                          │
+│  • Review generated snapshots to ensure they capture expected output         │
+│  • Update snapshots when output changes are intentional                      │
+│  • Include recorded tests in your CI/CD pipeline                             │
+│                                                                              │
+│  🎨 EXAMPLE SCENARIOS                                                        │
+│    # Test local file processing with specific format                         │
+│    python onefilellm.py --record-test json-processing data.json --format     │
+│  json                                                                        │
+│                                                                              │
+│    # Test web crawling with parameters                                       │
+│    python onefilellm.py --record-test web-crawl-test https://example.com \   │
+│      --crawl-max-depth 2 --crawl-max-pages 10                                │
+│                                                                              │
+│    # Test alias expansion                                                    │
+│    python onefilellm.py --record-test alias-test ofl_repo                    │
+│                                                                              │
+│    # Test multiple inputs                                                    │
+│    python onefilellm.py --record-test multi-input file1.txt file2.py dir/    │
+│                                                                              │
+│    # Test stream processing                                                  │
+│    echo 'test content' | python onefilellm.py --record-test stdin-test -     │
+│                                                                              │
+│  ⚠️  LIMITATIONS                                                              │
+│  • Test names must be valid Python identifiers (alphanumeric + underscores)  │
+│  • The --record-test flag itself is not included in the recorded command     │
+│  • Interactive prompts are not supported in recorded tests                   │
+│  • Tests with time-sensitive or random output may need special handling      │
+│                                                                              │
+│  🔍 ADVANCED USAGE                                                           │
+│    # Record a complex pipeline test                                          │
+│    python onefilellm.py --record-test pipeline-test \                        │
+│      https://github.com/microsoft/vscode/issues/1234 \                       │
+│      https://github.com/microsoft/vscode/pull/5678 \                         │
+│      --crawl-max-depth 1                                                     │
+│                                                                              │
+│    # Test error handling                                                     │
+│    python onefilellm.py --record-test error-test /nonexistent/file.txt       │
+│                                                                              │
+│  📊 TEST ORGANIZATION                                                        │
+│  Generated tests follow this structure:                                      │
+│                                                                              │
+│    tests/                                                                    │
+│    ├── harness.py              # Subprocess execution framework              │
+│    ├── test_recorded_*.py      # Generated test files                        │
+│    └── snapshots/              # Snapshot output files                       │
+│        └── <test_name>_<hash>.txt                                            │
+│                                                                              │
+│  🚧 TROUBLESHOOTING                                                          │
+│  If test recording fails:                                                    │
+│  • Ensure all dependencies are installed (pytest, pytest-snapshot)           │
+│  • Check that the tests/ directory exists and is writable                    │
+│  • Verify the test name is valid (no spaces or special characters)           │
+│  • Make sure the command works without --record-test first                   │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
