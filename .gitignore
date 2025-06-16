@@ -76,6 +76,7 @@ tmp/
 build/
 out/
 target/
+backup/
 
 # Python
 __pycache__/
@@ -96,7 +97,14 @@ venv
 **/.claude/settings.local.json
 
 # Claude assistant files
+.claude/
 CLAUDE.md
+CLAUDE_n.md
+CLAUDE_0.md
+CLAUDE_1.md
+CLAUDE_2.md
+CLAUDE_3.md
+CLAUDE_4.md
 test_file.txt
 test_file.pdf
 clipboard_content.txt

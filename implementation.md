@@ -1,1 +1,0 @@
-This project onefilellm has an updated ./tests folder which is the complete test battery from the old project.  what I would like for you to do is to distribute these tests to all 4 programmers and have them run these tests on the new updated onefilellm project and make sure everything works.  there might need to be some minor test changes to make sure things work.  
