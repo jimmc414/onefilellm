@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/jimmc414-onefilellm-badge.png)](https://mseep.ai/app/jimmc414-onefilellm)
+
 # OneFileLLM
 
 A CLI utility for aggregating and structuring multi-source data for LLM context.
