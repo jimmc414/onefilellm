@@ -93,6 +93,34 @@ python onefilellm.py --alias-add vercel-ai-sdk https://github.com/vercel/ai http
 python onefilellm.py --alias-add mcp-spec https://modelcontextprotocol.io/llms-full.txt https://github.com/modelcontextprotocol/python-sdk
 ```
 
+## Command-Line Interface (CLI)
+
+This project can also be installed as a command-line tool, which allows you to run `onefilellm` directly from your terminal.
+
+### CLI Installation
+
+To install the CLI, run the following command in the project's root directory:
+
+```bash
+pip install -e .
+```
+
+This will install the package in "editable" mode, meaning any changes you make to the source code will be immediately available to the command-line tool.
+
+### CLI Usage
+
+Once installed, you can use the `onefilellm` command instead of `python onefilellm.py`.
+
+**Synopsis:**
+`onefilellm [OPTIONS] [INPUT_SOURCES...]`
+
+**Example:**
+```bash
+onefilellm ./docs/ https://github.com/user/project/issues/123
+```
+
+All other command-line arguments and options work the same as the script-based approach.
+
 **Using an Alias:**
 You can then invoke an alias by its name.
 ```bash
