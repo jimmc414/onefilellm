@@ -3,19 +3,12 @@ import time
 import requests
 from bs4 import BeautifulSoup, Comment
 from urllib.parse import urljoin, urlparse
-from PyPDF2 import PdfReader
 import os
 import sys
 import json
 import tiktoken
-import nltk
-from nltk.corpus import stopwords
 import re
 import shlex
-import nbformat
-from nbconvert import PythonExporter
-from youtube_transcript_api import YouTubeTranscriptApi
-from youtube_transcript_api.formatters import TextFormatter
 import pyperclip
 from pathlib import Path
 import wget
@@ -26,11 +19,9 @@ from rich.text import Text
 from rich.prompt import Prompt
 from rich.progress import Progress, TextColumn, BarColumn, TimeRemainingColumn
 import xml.etree.ElementTree as ET # Keep for preprocess_text if needed
-import pandas as pd
 from typing import Union, List, Dict, Optional, Set, Tuple
 from dotenv import load_dotenv
 from urllib.robotparser import RobotFileParser
-import aiohttp
 from readability import Document
 import io
 import argparse
@@ -312,14 +303,6 @@ def process_text_stream(raw_text_content: str, source_info: dict, console: Conso
     
     return final_xml_for_stream
 
-stop_words = set()
-if ENABLE_COMPRESSION_AND_NLTK:
-    try:
-        nltk.download("stopwords", quiet=True)
-        stop_words = set(stopwords.words("english"))
-    except Exception as e:
-        print(f"[bold yellow]Warning:[/bold yellow] Failed to download or load NLTK stopwords. Compression will proceed without stopword removal. Error: {e}")
-
 TOKEN = os.getenv('GITHUB_TOKEN', 'default_token_here')
 if TOKEN == 'default_token_here':
     # Consider making this a non-fatal warning or prompt if interactive use is common
@@ -330,6 +313,8 @@ headers = {"Authorization": f"token {TOKEN}"} if TOKEN != 'default_token_here' e
 
 def process_ipynb_file(temp_file):
     try:
+        import nbformat
+        from nbconvert import PythonExporter
         with open(temp_file, "r", encoding='utf-8', errors='ignore') as f:
             notebook_content = f.read()
         exporter = PythonExporter()
@@ -485,6 +470,7 @@ def _process_pdf_content_from_path(file_path):
     print(f"  Extracting text from local PDF: {file_path}")
     text_list = []
     try:
+        from PyPDF2 import PdfReader
         with open(file_path, 'rb') as pdf_file_obj:
             pdf_reader = PdfReader(pdf_file_obj)
             if not pdf_reader.pages:
@@ -579,6 +565,8 @@ def excel_to_markdown(
     RuntimeError
         If *none* of the sheets meet the header-detection criteria.
     """
+    import pandas as pd
+    
     file_path = Path(file_path).expanduser().resolve()
     if file_path.suffix.lower() not in {".xls", ".xlsx"}:
         raise ValueError("Only .xls/.xlsx files are supported")
@@ -678,6 +666,7 @@ def excel_to_markdown_from_url(
     ValueError, RuntimeError, RequestException
         Various errors that might occur during downloading or processing.
     """
+    import pandas as pd
     import io
     print(f"  Downloading Excel file from URL: {url}")
     
@@ -781,6 +770,7 @@ def process_arxiv_pdf(arxiv_abs_url):
 
         print("Extracting text from PDF...")
         text_list = []
+        from PyPDF2 import PdfReader
         with open(temp_pdf_path, 'rb') as pdf_file:
             pdf_reader = PdfReader(pdf_file)
             for i, page in enumerate(range(len(pdf_reader.pages))):
@@ -890,6 +880,7 @@ def fetch_youtube_transcript(url):
     if not transcript_text:
         try:
             print("Falling back to youtube_transcript_api...")
+            from youtube_transcript_api import YouTubeTranscriptApi
             transcript_list = YouTubeTranscriptApi.get_transcript(video_id)
             
             if isinstance(transcript_list, list) and transcript_list:
@@ -934,6 +925,17 @@ def preprocess_text(input_file, output_file):
     print("Preprocessing text for compression (if enabled)...")
     with open(input_file, "r", encoding="utf-8") as infile:
         input_text = infile.read()
+
+    # Lazy load NLTK stopwords only when needed
+    stop_words = set()
+    if ENABLE_COMPRESSION_AND_NLTK:
+        try:
+            import nltk
+            from nltk.corpus import stopwords
+            nltk.download("stopwords", quiet=True)
+            stop_words = set(stopwords.words("english"))
+        except Exception as e:
+            print(f"[bold yellow]Warning:[/bold yellow] Failed to download or load NLTK stopwords. Compression will proceed without stopword removal. Error: {e}")
 
     def process_content(text):
         text = re.sub(r"[\n\r]+", "\n", text)
@@ -1017,6 +1019,7 @@ def process_web_pdf(url):
 
         print(f"  Extracting text from PDF: {url}")
         text_list = []
+        from PyPDF2 import PdfReader
         with open(temp_pdf_path, 'rb') as pdf_file:
             pdf_reader = PdfReader(pdf_file)
             for page in range(len(pdf_reader.pages)):
@@ -1210,7 +1213,7 @@ class DocCrawler:
         self.start_url_path_prefix = parsed_start.path.rstrip('/') or "/"  # For --crawl-restrict-path
         
         self.robots_parsers: Dict[str, RobotFileParser] = {}
-        self.session: Optional[aiohttp.ClientSession] = None
+        self.session = None  # Will be aiohttp.ClientSession when initialized
         self.rich_progress = None  # For Rich progress bar
         self.progress_task_id = None
         
@@ -1238,6 +1241,7 @@ class DocCrawler:
         self.ignore_epubs = getattr(self.config, 'crawl_ignore_epubs', True)
 
     async def _init_session(self):
+        import aiohttp
         headers = {
             "User-Agent": self.user_agent,
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -1325,7 +1329,10 @@ class DocCrawler:
                 
         except asyncio.TimeoutError:
             return None, "Request timed out", None
-        except aiohttp.ClientError as e:
+        except Exception as e:
+            # Check if it's an aiohttp ClientError
+            if e.__class__.__name__ == 'ClientError':
+                return None, f"Client error: {e}", None
             return None, f"Client error: {e}", None
         except Exception as e:
             return None, f"Unexpected fetch error: {e}", None
@@ -1506,6 +1513,7 @@ class DocCrawler:
     async def _process_pdf_content_from_bytes(self, pdf_bytes: bytes, url: str) -> Optional[Dict]:
         self.console.print(f"  [cyan]Extracting text from PDF:[/cyan] {url}")
         try:
+            from PyPDF2 import PdfReader
             pdf_file_obj = io.BytesIO(pdf_bytes)
             pdf_reader = PdfReader(pdf_file_obj)
             if not pdf_reader.pages:
@@ -1770,6 +1778,7 @@ def process_doi_or_pmid(identifier):
                 f.write(pdf_response.content)
 
             print("  Extracting text from PDF...")
+            from PyPDF2 import PdfReader
             with open(pdf_filename, 'rb') as pdf_file:
                 pdf_reader = PdfReader(pdf_file)
                 text_list = []
