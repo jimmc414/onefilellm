@@ -2096,7 +2096,7 @@ async def process_input(input_path, args, progress=None, task=None):
                     console.print(f"[bold red]Error processing Excel URL {input_path}: {e}[/bold red]")
                     result = f'<source type="web_excel" url="{escape_xml(input_path)}"><e>Failed to process Excel file: {escape_xml(str(e))}</e></source>'
             # Process URL directly if it ends with a recognized file extension
-            elif any(input_path.lower().endswith(ext) for ext in [ext for ext in ['.txt', '.md', '.rst', '.tex', '.html', '.htm', '.css', '.js', '.ts', '.py', '.java', '.c', '.cpp', '.h', '.hpp', '.cs', '.rb', '.php', '.swift', '.kt', '.scala', '.rs', '.lua', '.pl', '.sh', '.bash', '.zsh', '.ps1', '.sql', '.groovy', '.dart', '.json', '.yaml', '.yml', '.xml', '.toml', '.ini', '.cfg', '.conf', '.properties', '.csv', '.tsv', '.proto', '.graphql', '.tf', '.tfvars', '.hcl'] if is_allowed_filetype(f"test{ext}")] if ext != '.pdf'):
+            elif any(input_path.lower().endswith(ext) for ext in [ext for ext in ['.txt', '.md', '.bat', '.cmd', '.html', '.htm', '.css', '.js', '.ts', '.py', '.java', '.c', '.cpp', '.h', '.hpp', '.cs', '.rb', '.php', '.swift', '.kt', '.scala', '.rs', '.lua', '.pl', '.sh', '.bash', '.zsh', '.ps1', '.sql', '.groovy', '.dart', '.json', '.yaml', '.yml', '.xml', '.toml', '.ini', '.cfg', '.conf', '.properties', '.csv', '.tsv', '.proto', '.graphql', '.tf', '.tfvars', '.hcl'] if is_allowed_filetype(f"test{ext}")] if ext != '.pdf'):
                 console.print(f"Processing direct file URL: {input_path}")
                 file_content = _download_and_read_file(input_path)
                 filename = os.path.basename(urlparse(input_path).path)
