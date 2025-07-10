@@ -809,8 +809,11 @@ def process_arxiv_pdf(arxiv_abs_url):
 
 def fetch_youtube_transcript(url):
     """
-    Fetches YouTube transcript using youtube_transcript_api, wrapped in XML.
+    Fetches YouTube transcript using yt-dlp with fallback to youtube_transcript_api, wrapped in XML.
     """
+    import tempfile
+    import subprocess
+    
     def extract_video_id(url):
         pattern = r'(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:[^\/\n\s]+\/\S+\/|(?:v|e(?:mbed)?)\/|\S*?[?&]v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})'
         match = re.search(pattern, url)
@@ -819,73 +822,108 @@ def fetch_youtube_transcript(url):
     video_id = extract_video_id(url)
     if not video_id:
         print(f"[bold red]Could not extract YouTube video ID from URL: {url}[/bold red]")
-        # Use XML for errors
         return f'<source type="youtube_transcript" url="{escape_xml(url)}">\n<error>Could not extract video ID from URL.</error>\n</source>'
 
-    transcript_data = None
+    transcript_text = None
     error_msg = None
     
-    # Try Method 1: Direct get_transcript (works for some videos)
+    # Try Method 1: Use yt-dlp (most reliable)
     try:
-        print(f"Fetching transcript for YouTube video ID: {video_id}")
-        transcript_list = YouTubeTranscriptApi.get_transcript(video_id)
+        print(f"Fetching transcript for YouTube video ID: {video_id} using yt-dlp...")
         
-        if isinstance(transcript_list, list) and transcript_list:
-            transcript_data = transcript_list
-            print(f"Transcript fetched successfully using direct method. Got {len(transcript_list)} entries.")
-    except Exception as e:
-        error_msg = str(e)
-        print(f"Direct method failed: {error_msg}")
-    
-    # Try Method 2: List transcripts and fetch the first available one
-    if not transcript_data:
-        try:
-            print("Trying alternative method: listing available transcripts...")
-            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        # Create a temporary directory for subtitle files
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_template = os.path.join(temp_dir, '%(id)s.%(ext)s')
             
-            # Try to fetch the first available transcript
-            for transcript in transcript_list:
-                try:
-                    print(f"Attempting to fetch {transcript.language} transcript...")
-                    transcript_data = transcript.fetch()
-                    if transcript_data:
-                        print(f"Successfully fetched {transcript.language} transcript.")
-                        break
-                except:
-                    continue
-                    
+            # yt-dlp command to download subtitles only
+            cmd = [
+                'yt-dlp',
+                '--write-auto-sub',  # Get automatic subtitles if available
+                '--write-sub',       # Get manual subtitles if available
+                '--sub-lang', 'en',  # Prefer English, but will get others if not available
+                '--skip-download',   # Don't download the video
+                '--quiet',           # Reduce output
+                '--no-warnings',
+                '-o', output_template,
+                url
+            ]
+            
+            # Run yt-dlp
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            
+            # Look for subtitle files
+            subtitle_files = []
+            for ext in ['.en.vtt', '.en.srt', '.vtt', '.srt']:
+                subtitle_path = os.path.join(temp_dir, f"{video_id}{ext}")
+                if os.path.exists(subtitle_path):
+                    subtitle_files.append(subtitle_path)
+            
+            if subtitle_files:
+                # Read the first available subtitle file
+                with open(subtitle_files[0], 'r', encoding='utf-8') as f:
+                    content = f.read()
+                
+                # Parse VTT or SRT format to extract just the text
+                lines = content.split('\n')
+                transcript_lines = []
+                
+                for line in lines:
+                    # Skip timestamp lines and empty lines
+                    if '-->' not in line and line.strip() and not line.strip().isdigit() and not line.startswith('WEBVTT'):
+                        # Remove HTML tags if present
+                        clean_line = re.sub(r'<[^>]+>', '', line)
+                        if clean_line.strip():
+                            transcript_lines.append(clean_line.strip())
+                
+                transcript_text = ' '.join(transcript_lines)
+                print(f"Transcript fetched successfully using yt-dlp. Got {len(transcript_lines)} lines.")
+            else:
+                error_msg = "No subtitle files found"
+                
+    except FileNotFoundError:
+        error_msg = "yt-dlp not found. Please install it with: pip install yt-dlp"
+    except Exception as e:
+        error_msg = f"yt-dlp failed: {str(e)}"
+        print(f"yt-dlp method failed: {error_msg}")
+    
+    # Try Method 2: Fallback to youtube_transcript_api
+    if not transcript_text:
+        try:
+            print("Falling back to youtube_transcript_api...")
+            transcript_list = YouTubeTranscriptApi.get_transcript(video_id)
+            
+            if isinstance(transcript_list, list) and transcript_list:
+                # Format transcript entries
+                transcript_lines = []
+                for entry in transcript_list:
+                    if 'text' in entry:
+                        transcript_lines.append(entry['text'])
+                
+                transcript_text = ' '.join(transcript_lines)
+                print(f"Transcript fetched successfully using youtube_transcript_api. Got {len(transcript_list)} entries.")
         except Exception as e:
             if not error_msg:
-                error_msg = str(e)
+                error_msg = f"youtube_transcript_api also failed: {str(e)}"
     
     # Format the successful transcript or return error
-    if transcript_data:
-        try:
-            formatter = TextFormatter()
-            transcript = formatter.format_transcript(transcript_data)
-            
-            # Use XML structure for success
-            formatted_text = f'<source type="youtube_transcript" url="{escape_xml(url)}">\n'
-            formatted_text += transcript # Append raw transcript text
-            formatted_text += '\n</source>' # Close source tag
-            return formatted_text
-        except Exception as e:
-            error_msg = f"Error formatting transcript: {str(e)}"
+    if transcript_text:
+        # Use XML structure for success
+        formatted_text = f'<source type="youtube_transcript" url="{escape_xml(url)}">\n'
+        formatted_text += transcript_text
+        formatted_text += '\n</source>'
+        return formatted_text
     
     # Handle errors
     if not error_msg:
-        error_msg = "Unable to fetch transcript"
+        error_msg = "Unable to fetch transcript with either yt-dlp or youtube_transcript_api"
         
     # Check for common error types and provide better messages
     if "no element found" in error_msg or "ParseError" in error_msg:
-        error_msg = "No captions/transcript available for this video (parsing error)"
+        error_msg = "No captions/transcript available for this video"
     elif "NoTranscriptFound" in error_msg:
         error_msg = "No transcript found for this video"
-    elif "'dict' object has no attribute 'text'" in error_msg:
-        error_msg = "Unexpected transcript format"
         
     print(f"[bold red]Error fetching YouTube transcript for {url}: {error_msg}[/bold red]")
-    # Use XML structure for errors
     return f'<source type="youtube_transcript" url="{escape_xml(url)}">\n<error>{escape_xml(error_msg)}</error>\n</source>'
 
 def preprocess_text(input_file, output_file):
@@ -2058,7 +2096,7 @@ async def process_input(input_path, args, progress=None, task=None):
                     console.print(f"[bold red]Error processing Excel URL {input_path}: {e}[/bold red]")
                     result = f'<source type="web_excel" url="{escape_xml(input_path)}"><e>Failed to process Excel file: {escape_xml(str(e))}</e></source>'
             # Process URL directly if it ends with a recognized file extension
-            elif any(input_path.lower().endswith(ext) for ext in [ext for ext in ['.txt', '.md', '.rst', '.tex', '.html', '.htm', '.css', '.js', '.ts', '.py', '.java', '.c', '.cpp', '.h', '.hpp', '.cs', '.rb', '.php', '.swift', '.kt', '.scala', '.rs', '.lua', '.pl', '.sh', '.bash', '.zsh', '.ps1', '.sql', '.groovy', '.dart', '.json', '.yaml', '.yml', '.xml', '.toml', '.ini', '.cfg', '.conf', '.properties', '.csv', '.tsv', '.proto', '.graphql', '.tf', '.tfvars', '.hcl'] if is_allowed_filetype(f"test{ext}")] if ext != '.pdf'):
+            elif any(input_path.lower().endswith(ext) for ext in [ext for ext in ['.txt', '.md', '.bat', '.cmd', '.html', '.htm', '.css', '.js', '.ts', '.py', '.java', '.c', '.cpp', '.h', '.hpp', '.cs', '.rb', '.php', '.swift', '.kt', '.scala', '.rs', '.lua', '.pl', '.sh', '.bash', '.zsh', '.ps1', '.sql', '.groovy', '.dart', '.json', '.yaml', '.yml', '.xml', '.toml', '.ini', '.cfg', '.conf', '.properties', '.csv', '.tsv', '.proto', '.graphql', '.tf', '.tfvars', '.hcl'] if is_allowed_filetype(f"test{ext}")] if ext != '.pdf'):
                 console.print(f"Processing direct file URL: {input_path}")
                 file_content = _download_and_read_file(input_path)
                 filename = os.path.basename(urlparse(input_path).path)
