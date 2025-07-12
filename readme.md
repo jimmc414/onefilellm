@@ -42,7 +42,6 @@ onefilellm ./docs/ https://github.com/user/project/issues/123
 
 All other command-line arguments and options work the same as the script-based approach.
 
-=======
 For GitHub API access (recommended):
 
 ```bash
