@@ -174,9 +174,7 @@ python onefilellm.py --alias-list              # Show all aliases
 python onefilellm.py --alias-list-core         # Show core aliases only
 python onefilellm.py --alias-remove old-alias  # Remove user alias
 cat ~/.onefilellm_aliases/aliases.json         # View raw JSON
-```
 
-Alias Management:
   --alias-add NAME [COMMAND_STRING ...]
                         Add or update a user-defined alias. Multiple arguments
                         after NAME will be joined as COMMAND_STRING.
