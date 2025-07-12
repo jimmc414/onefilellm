@@ -42,8 +42,6 @@ onefilellm ./docs/ https://github.com/user/project/issues/123
 
 All other command-line arguments and options work the same as the script-based approach.
 
-**Using an Alias:**
-You can then invoke an alias by its name.
 =======
 For GitHub API access (recommended):
 
