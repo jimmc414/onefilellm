@@ -87,57 +87,6 @@ options:
   --help-topic [TOPIC]  Show help for specific topic (basic, aliases,
                         crawling, pipelines, examples, config)
 
-Alias Management:
-  --alias-add NAME [COMMAND_STRING ...]
-                        Add or update a user-defined alias. Multiple arguments
-                        after NAME will be joined as COMMAND_STRING.
-  --alias-remove NAME   Remove a user-defined alias.
-  --alias-list          List all effective aliases (user-defined aliases
-                        override core aliases).
-  --alias-list-core     List only pre-shipped (core) aliases.
-
-Web Crawler Options:
-  --crawl-max-depth CRAWL_MAX_DEPTH
-                        Maximum crawl depth (default: 3)
-  --crawl-max-pages CRAWL_MAX_PAGES
-                        Maximum pages to crawl (default: 1000)
-  --crawl-user-agent CRAWL_USER_AGENT
-                        User agent for web requests (default:
-                        OneFileLLMCrawler/1.1)
-  --crawl-delay CRAWL_DELAY
-                        Delay between requests in seconds (default: 0.25)
-  --crawl-include-pattern CRAWL_INCLUDE_PATTERN
-                        Regex pattern for URLs to include
-  --crawl-exclude-pattern CRAWL_EXCLUDE_PATTERN
-                        Regex pattern for URLs to exclude
-  --crawl-timeout CRAWL_TIMEOUT
-                        Request timeout in seconds (default: 20)
-  --crawl-include-images
-                        Include image URLs in output
-  --crawl-no-include-code
-                        Exclude code blocks from output
-  --crawl-no-extract-headings
-                        Exclude heading extraction
-  --crawl-follow-links  Follow links to external domains
-  --crawl-no-clean-html
-                        Disable readability cleaning
-  --crawl-no-strip-js   Keep JavaScript code
-  --crawl-no-strip-css  Keep CSS styles
-  --crawl-no-strip-comments
-                        Keep HTML comments
-  --crawl-respect-robots
-                        Respect robots.txt (default: ignore for backward
-                        compatibility)
-  --crawl-concurrency CRAWL_CONCURRENCY
-                        Number of concurrent requests (default: 3)
-  --crawl-restrict-path
-                        Restrict crawl to paths under start URL
-  --crawl-no-include-pdfs
-                        Skip PDF files
-  --crawl-no-ignore-epubs
-                        Include EPUB files
-```
-
 ## Quick Start Examples
 
 ### Local Files and Directories
@@ -170,6 +119,14 @@ python onefilellm.py https://www.youtube.com/watch?v=dQw4w9WgXcQ
 python onefilellm.py https://arxiv.org/abs/2103.00020
 python onefilellm.py arxiv:1706.03762 PMID:35177773
 python onefilellm.py doi:10.1038/s41586-021-03819-2
+```
+
+### **Multiple Inputs**
+```bash
+python onefilellm.py https://github.com/jimmc414/hey-claude https://modelcontextprotocol.io/llms-full.txt https://github.com/anthropics/anthropic-sdk-python https://github.com/anthropics/anthropic-cookbook
+python onefilellm.py https://github.com/openai/whisper/tree/main/whisper https://www.youtube.com/watch?v=dQw4w9WgXcQ ALIAS_MCP
+python onefilellm.py https://github.com/microsoft/vscode/pull/12345 https://arxiv.org/abs/2103.00020 
+python onefilellm.py https://github.com/kubernetes/kubernetes/issues https://pytorch.org/docs
 ```
 
 ### Input Streams
@@ -220,6 +177,57 @@ python onefilellm.py --alias-list              # Show all aliases
 python onefilellm.py --alias-list-core         # Show core aliases only
 python onefilellm.py --alias-remove old-alias  # Remove user alias
 cat ~/.onefilellm_aliases/aliases.json         # View raw JSON
+```
+
+Alias Management:
+  --alias-add NAME [COMMAND_STRING ...]
+                        Add or update a user-defined alias. Multiple arguments
+                        after NAME will be joined as COMMAND_STRING.
+  --alias-remove NAME   Remove a user-defined alias.
+  --alias-list          List all effective aliases (user-defined aliases
+                        override core aliases).
+  --alias-list-core     List only pre-shipped (core) aliases.
+
+Web Crawler Options:
+  --crawl-max-depth CRAWL_MAX_DEPTH
+                        Maximum crawl depth (default: 3)
+  --crawl-max-pages CRAWL_MAX_PAGES
+                        Maximum pages to crawl (default: 1000)
+  --crawl-user-agent CRAWL_USER_AGENT
+                        User agent for web requests (default:
+                        OneFileLLMCrawler/1.1)
+  --crawl-delay CRAWL_DELAY
+                        Delay between requests in seconds (default: 0.25)
+  --crawl-include-pattern CRAWL_INCLUDE_PATTERN
+                        Regex pattern for URLs to include
+  --crawl-exclude-pattern CRAWL_EXCLUDE_PATTERN
+                        Regex pattern for URLs to exclude
+  --crawl-timeout CRAWL_TIMEOUT
+                        Request timeout in seconds (default: 20)
+  --crawl-include-images
+                        Include image URLs in output
+  --crawl-no-include-code
+                        Exclude code blocks from output
+  --crawl-no-extract-headings
+                        Exclude heading extraction
+  --crawl-follow-links  Follow links to external domains
+  --crawl-no-clean-html
+                        Disable readability cleaning
+  --crawl-no-strip-js   Keep JavaScript code
+  --crawl-no-strip-css  Keep CSS styles
+  --crawl-no-strip-comments
+                        Keep HTML comments
+  --crawl-respect-robots
+                        Respect robots.txt (default: ignore for backward
+                        compatibility)
+  --crawl-concurrency CRAWL_CONCURRENCY
+                        Number of concurrent requests (default: 3)
+  --crawl-restrict-path
+                        Restrict crawl to paths under start URL
+  --crawl-no-include-pdfs
+                        Skip PDF files
+  --crawl-no-ignore-epubs
+                        Include EPUB files
 ```
 
 ## Advanced Web Crawling
