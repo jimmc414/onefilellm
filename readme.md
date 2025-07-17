@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/jimmc414-onefilellm-badge.png)](https://mseep.ai/app/jimmc414-onefilellm)
+
 # OneFileLLM
 
 Content Aggregator for LLMs - Aggregate and structure multi-source data into a single XML file for LLM context.
