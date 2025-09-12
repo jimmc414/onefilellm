@@ -67,7 +67,8 @@ _cl100k_encoding = None
 # --- Alias Configuration ---
 ALIAS_DIR_NAME = ".onefilellm_aliases"  # Re-use existing constant
 ALIAS_DIR = Path.home() / ALIAS_DIR_NAME
-ALIAS_CONFIG_DIR = ALIAS_DIR  # Backwards compatibility for tests
+# Backwards compatibility: some tests and code may reference ALIAS_CONFIG_DIR
+ALIAS_CONFIG_DIR = ALIAS_DIR
 USER_ALIASES_PATH = ALIAS_DIR / "aliases.json"
 
 CORE_ALIASES = {
