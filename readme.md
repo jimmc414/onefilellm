@@ -100,6 +100,8 @@ python onefilellm.py https://github.com/microsoft/vscode
 python onefilellm.py https://github.com/openai/whisper/tree/main/whisper
 python onefilellm.py https://github.com/microsoft/vscode/pull/12345
 python onefilellm.py https://github.com/kubernetes/kubernetes/issues
+python onefilellm.py https://github.com/kubernetes/kubernetes/issues?state=open
+python onefilellm.py https://github.com/kubernetes/kubernetes/issues?state=closed
 ```
 
 ### Web Documentation and APIs
