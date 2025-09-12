@@ -45,6 +45,8 @@ except ImportError:
 # --- Configuration Flags ---
 ENABLE_COMPRESSION_AND_NLTK = False # Set to True to enable NLTK download, stopword removal, and compressed output
 TOKEN_ESTIMATE_MULTIPLIER = 1.37 # Multiplier to estimate model token usage from tiktoken count
+# Global flag to disable network operations when set
+OFFLINE_MODE = os.getenv("OFFLINE_MODE", "").lower() in ("1", "true", "yes")
 # --- End Configuration Flags ---
 
 # --- Output Format Notes ---
@@ -762,6 +764,10 @@ def process_arxiv_pdf(arxiv_abs_url):
     """
     pdf_url = arxiv_abs_url.replace("/abs/", "/pdf/") + ".pdf"
     temp_pdf_path = 'temp_arxiv.pdf'
+    if OFFLINE_MODE:
+        msg = "Offline mode enabled; skipping ArXiv download"
+        print(f"[bold yellow]{msg}[/bold yellow]")
+        return f'<source type="arxiv" url="{escape_xml(arxiv_abs_url)}"><error>{escape_xml(msg)}</error></source>'
     try:
         print(f"Downloading ArXiv PDF from {pdf_url}...")
         response = requests.get(pdf_url)
@@ -788,6 +794,9 @@ def process_arxiv_pdf(arxiv_abs_url):
         print("ArXiv paper processed successfully.")
         return formatted_text
 
+    except requests.exceptions.ProxyError as e:
+        print(f"[bold red]Proxy error downloading ArXiv PDF {pdf_url}: {e}[/bold red]")
+        return f'<source type="arxiv" url="{escape_xml(arxiv_abs_url)}"><error>Proxy error: {escape_xml(str(e))}</error></source>'
     except requests.RequestException as e:
         print(f"[bold red]Error downloading ArXiv PDF {pdf_url}: {e}[/bold red]")
         return f'<source type="arxiv" url="{escape_xml(arxiv_abs_url)}"><error>Failed to download PDF: {escape_xml(str(e))}</error></source>'
@@ -1029,6 +1038,9 @@ def process_web_pdf(url):
                 if page_text:
                     text_list.append(page_text)
         return ' '.join(text_list)
+    except requests.exceptions.ProxyError as e:
+        print(f"  [bold red]Proxy error downloading PDF {url}: {e}[/bold red]")
+        return f"<error>Proxy error: {escape_xml(str(e))}</error>"
     except requests.RequestException as e:
         print(f"  [bold red]Error downloading PDF {url}: {e}[/bold red]")
         return f"<error>Failed to download PDF: {escape_xml(str(e))}</error>"
@@ -1044,6 +1056,14 @@ def crawl_and_extract_text(base_url, max_depth, include_pdfs, ignore_epubs):
     """
     Crawls a website starting from base_url, extracts text, and wraps in XML.
     """
+    if OFFLINE_MODE:
+        msg = "Offline mode enabled; skipping web crawl"
+        print(f"[bold yellow]{msg}[/bold yellow]")
+        return {
+            'content': f'<source type="web_crawl" base_url="{escape_xml(base_url)}"><error>{escape_xml(msg)}</error></source>',
+            'processed_urls': []
+        }
+
     visited_urls = set()
     urls_to_visit = [(base_url, 0)]
     processed_urls_content = {} # Store URL -> content/error
@@ -1138,14 +1158,17 @@ def crawl_and_extract_text(base_url, max_depth, include_pdfs, ignore_epubs):
 
 
         except requests.exceptions.Timeout:
-             print(f"[bold red]Timeout retrieving {clean_url}[/bold red]")
-             page_content += f'\n<error>Timeout during request</error>\n'
+            print(f"[bold red]Timeout retrieving {clean_url}[/bold red]")
+            page_content += f'\n<error>Timeout during request</error>\n'
+        except requests.exceptions.ProxyError as e:
+            print(f"[bold red]Proxy error retrieving {clean_url}: {e}[/bold red]")
+            page_content += f'\n<error>Proxy error: {escape_xml(str(e))}</error>\n'
         except requests.RequestException as e:
             print(f"[bold red]Failed to retrieve {clean_url}: {e}[/bold red]")
             page_content += f'\n<error>Failed to retrieve URL: {escape_xml(str(e))}</error>\n'
         except Exception as e: # Catch other errors like BeautifulSoup issues
-             print(f"[bold red]Error processing page {clean_url}: {e}[/bold red]")
-             page_content += f'\n<error>Error processing page: {escape_xml(str(e))}</error>\n'
+            print(f"[bold red]Error processing page {clean_url}: {e}[/bold red]")
+            page_content += f'\n<error>Error processing page: {escape_xml(str(e))}</error>\n'
 
         page_content += '</page>' # Close page tag
         all_text.append(page_content)

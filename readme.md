@@ -316,8 +316,9 @@ All output is encapsulated in XML for better LLM processing:
 ## Configuration
 
 - **Alias Storage**: `~/.onefilellm_aliases/aliases.json`
-- **Environment Variables**: 
+- **Environment Variables**:
   - `GITHUB_TOKEN` - GitHub API access token
+  - `OFFLINE_MODE` - Set to `1` to skip network operations
   - Can use `.env` file in project root
 
 ## Additional Help
