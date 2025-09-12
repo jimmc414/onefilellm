@@ -59,8 +59,10 @@ EXCLUDED_DIRS = ["dist", "node_modules", ".git", "__pycache__"]
 
 # --- Alias Configuration ---
 ALIAS_DIR_NAME = ".onefilellm_aliases"  # Re-use existing constant
-ALIAS_CONFIG_DIR = Path.home() / ALIAS_DIR_NAME
-USER_ALIASES_PATH = ALIAS_CONFIG_DIR / "aliases.json"
+ALIAS_DIR = Path.home() / ALIAS_DIR_NAME
+# Backwards compatibility: some tests and code may reference ALIAS_CONFIG_DIR
+ALIAS_CONFIG_DIR = ALIAS_DIR
+USER_ALIASES_PATH = ALIAS_DIR / "aliases.json"
 
 CORE_ALIASES = {
     "ofl_readme": "https://github.com/jimmc414/onefilellm/blob/main/readme.md",
@@ -73,7 +75,7 @@ CORE_ALIASES = {
 
 def ensure_alias_dir_exists():
     """Ensures the alias directory exists, creating it if necessary."""
-    ALIAS_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    ALIAS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 class AliasManager:
