@@ -446,7 +446,8 @@ class TestAliasSystem2OLD(unittest.TestCase):
     def test_alias_directory_creation(self):
         """Test alias directory creation"""
         ensure_alias_dir_exists()
-        alias_dir = Path.home() / ".onefilellm_aliases"
+        import onefilellm
+        alias_dir = Path(onefilellm.ALIAS_DIR)
         self.assertTrue(alias_dir.exists())
         self.assertTrue(alias_dir.is_dir())
     
@@ -542,7 +543,7 @@ class TestAliasSystem2(unittest.TestCase):
         self.alias_file = Path(self.temp_alias_dir) / "aliases.json"
         
         # Mock the alias configuration directory
-        self.config_dir_patcher = patch('onefilellm.ALIAS_CONFIG_DIR', Path(self.temp_alias_dir))
+        self.config_dir_patcher = patch('onefilellm.ALIAS_DIR', Path(self.temp_alias_dir))
         self.config_dir_patcher.start()
         
         # Mock the user aliases path
@@ -677,7 +678,7 @@ class TestAdvancedAliasFeatures(unittest.TestCase):
         self.alias_file = Path(self.temp_alias_dir) / "aliases.json"
         
         # Mock the alias configuration directory
-        self.config_dir_patcher = patch('onefilellm.ALIAS_CONFIG_DIR', Path(self.temp_alias_dir))
+        self.config_dir_patcher = patch('onefilellm.ALIAS_DIR', Path(self.temp_alias_dir))
         self.config_dir_patcher.start()
         
         # Mock the user aliases path
