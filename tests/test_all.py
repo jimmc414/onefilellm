@@ -33,6 +33,7 @@ from onefilellm import (
     process_doi_or_pmid,
     process_github_pull_request,
     process_github_issue,
+    process_github_issues,
     excel_to_markdown,
     process_input,
     process_text_stream,
@@ -1578,9 +1579,16 @@ class TestGitHubIssuesPullRequests(unittest.TestCase):
         """Test GitHub issue error response format"""
         # Test that without a token, we get a properly formatted error response
         result = process_github_issue("https://github.com/user/repo/issues/123")
-        
+
         # Should return properly formatted XML even for errors
         self.assertIn('<source type="github_issue"', result)
+        self.assertIn('error', result.lower())
+
+    def test_github_issues_error_response_format(self):
+        """Test GitHub issues list error response format"""
+        result = process_github_issues("https://github.com/user/repo/issues")
+
+        self.assertIn('<source type="github_issues"', result)
         self.assertIn('error', result.lower())
     
     def test_github_pr_error_response_format(self):

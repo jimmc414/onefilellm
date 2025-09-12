@@ -2,7 +2,7 @@ import asyncio
 import time
 import requests
 from bs4 import BeautifulSoup, Comment
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, parse_qs
 import os
 import sys
 import json
@@ -2089,8 +2089,106 @@ def process_github_issue(issue_url):
         print(f"[bold red]Error fetching GitHub issue data for {issue_url}: {e}[/bold red]")
         return f'<source type="github_issue" url="{escape_xml(issue_url)}"><error>Failed to fetch issue data: {escape_xml(str(e))}</error></source>'
     except Exception as e: # Catch other potential errors
-         print(f"[bold red]Unexpected error processing GitHub issue {issue_url}: {e}[/bold red]")
-         return f'<source type="github_issue" url="{escape_xml(issue_url)}"><error>Unexpected error: {escape_xml(str(e))}</error></source>'
+        print(f"[bold red]Unexpected error processing GitHub issue {issue_url}: {e}[/bold red]")
+        return f'<source type="github_issue" url="{escape_xml(issue_url)}"><error>Unexpected error: {escape_xml(str(e))}</error></source>'
+
+def process_github_issues(issues_url):
+    """Process all issues for a GitHub repository.
+
+    The issues URL can include an optional ``state`` query parameter with
+    values ``open``, ``closed`` or ``all`` (default). Each issue along with
+    its comments will be included in the output and the repository content
+    will be appended once at the end.
+    """
+
+    if TOKEN == 'default_token_here':
+        print("[bold red]Error:[/bold red] GitHub Token not set. Cannot process GitHub Issues.")
+        return f'<source type="github_issues" url="{escape_xml(issues_url)}"><error>GitHub Token not configured.</error></source>'
+
+    parsed = urlparse(issues_url)
+    path_parts = parsed.path.strip('/').split('/')
+    if len(path_parts) < 3 or path_parts[2] != 'issues':
+        print(f"[bold red]Invalid GitHub Issues URL: {issues_url}[/bold red]")
+        return f'<source type="github_issues" url="{escape_xml(issues_url)}"><error>Invalid URL format.</error></source>'
+
+    repo_owner, repo_name = path_parts[0], path_parts[1]
+
+    # Determine desired state
+    state = 'all'
+    query = parse_qs(parsed.query)
+    if 'state' in query and query['state']:
+        state = query['state'][0]
+
+    api_url = f"https://api.github.com/repos/{repo_owner}/{repo_name}/issues"
+
+    issues = []
+    page = 1
+    try:
+        while True:
+            params = {'state': state, 'per_page': 100, 'page': page}
+            response = requests.get(api_url, headers=headers, params=params)
+            response.raise_for_status()
+            batch = response.json()
+            if not batch:
+                break
+            issues.extend(batch)
+            if len(batch) < 100:
+                break
+            page += 1
+
+        formatted = [f'<source type="github_issues" url="{escape_xml(issues_url)}" state="{escape_xml(state)}">']
+
+        for issue in issues:
+            # Skip pull requests which also appear in issues listing
+            if 'pull_request' in issue:
+                continue
+            number = issue.get('number')
+            formatted.append(f'<issue number="{number}">')
+            formatted.append(f'<title>{escape_xml(issue.get("title", "N/A"))}</title>')
+            formatted.append('<description>')
+            formatted.append(issue.get('body', '') or '')
+            formatted.append('</description>')
+            details = (
+                f"User: {issue.get('user', {}).get('login', 'N/A')}, "
+                f"State: {issue.get('state', 'N/A')}, "
+                f"Number: {number}"
+            )
+            formatted.append(f'<details>{escape_xml(details)}</details>')
+
+            # Fetch comments
+            comments_url = issue.get('comments_url')
+            comments = []
+            if comments_url:
+                comments_resp = requests.get(comments_url, headers=headers)
+                if comments_resp.ok:
+                    comments = comments_resp.json()
+
+            if comments:
+                formatted.append('<comments>')
+                comments.sort(key=lambda c: c.get('created_at', ''))
+                for comment in comments:
+                    author = comment.get('user', {}).get('login', 'N/A')
+                    body = comment.get('body', '') or ''
+                    formatted.append(f'<comment author="{escape_xml(author)}">')
+                    formatted.append(body)
+                    formatted.append('</comment>')
+                formatted.append('</comments>')
+
+            formatted.append('</issue>')
+
+        # Append repository content once
+        repo_url = f"https://github.com/{repo_owner}/{repo_name}"
+        formatted.append('\n<!-- Associated Repository Content -->')
+        formatted.append(process_github_repo(repo_url))
+        formatted.append('\n</source>')
+        print("GitHub issues processed successfully.")
+        return "\n".join(formatted)
+    except requests.RequestException as e:
+        print(f"[bold red]Error fetching GitHub issues for {issues_url}: {e}[/bold red]")
+        return f'<source type="github_issues" url="{escape_xml(issues_url)}"><error>Failed to fetch issues: {escape_xml(str(e))}</error></source>'
+    except Exception as e:
+        print(f"[bold red]Unexpected error processing GitHub issues {issues_url}: {e}[/bold red]")
+        return f'<source type="github_issues" url="{escape_xml(issues_url)}"><error>Unexpected error: {escape_xml(str(e))}</error></source>'
 
 
 def combine_xml_outputs(outputs):
@@ -2131,9 +2229,13 @@ async def process_input(input_path, args, progress=None, task=None):
         
         # Input type detection logic
         if "github.com" in input_path:
-            if "/pull/" in input_path:
+            parsed_url = urlparse(input_path)
+            path = parsed_url.path
+            if "/pull/" in path:
                 result = process_github_pull_request(input_path)
-            elif "/issues/" in input_path:
+            elif path.rstrip('/').endswith('/issues'):
+                result = process_github_issues(input_path)
+            elif "/issues/" in path:
                 result = process_github_issue(input_path)
             else: # Assume repository URL
                 result = process_github_repo(input_path)
