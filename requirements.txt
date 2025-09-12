@@ -1,4 +1,4 @@
-requests==2.28.0
+requests==2.31.0
 beautifulsoup4==4.11.1
 PyPDF2==2.10.0
 tiktoken
