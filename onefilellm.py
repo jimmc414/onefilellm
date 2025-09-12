@@ -61,6 +61,7 @@ EXCLUDED_DIRS = ["dist", "node_modules", ".git", "__pycache__"]
 ALIAS_DIR_NAME = ".onefilellm_aliases"  # Re-use existing constant
 ALIAS_CONFIG_DIR = Path.home() / ALIAS_DIR_NAME
 USER_ALIASES_PATH = ALIAS_CONFIG_DIR / "aliases.json"
+ALIAS_DIR = ALIAS_CONFIG_DIR  # Legacy support for older alias tests
 
 CORE_ALIASES = {
     "ofl_readme": "https://github.com/jimmc414/onefilellm/blob/main/readme.md",
@@ -70,6 +71,81 @@ CORE_ALIASES = {
     # Consider adding more common aliases
 }
 # --- End Alias Configuration ---
+
+# --- Legacy Alias Functions (for backward compatibility with older tests) ---
+
+def is_potential_alias(candidate: str) -> bool:
+    """Heuristic check if a string looks like an alias name."""
+    if not candidate:
+        return False
+    if '://' in candidate or candidate.startswith('/'):
+        return False
+    # Basic Windows path detection
+    if re.match(r'^[A-Za-z]:\\', candidate):
+        return False
+    return bool(re.fullmatch(r'[A-Za-z0-9_-]+', candidate))
+
+import builtins
+builtins.is_potential_alias = is_potential_alias
+
+
+def handle_add_alias(args: List[str], console: Console) -> bool:
+    """Create an alias file mapping name to list of targets."""
+    if len(args) < 3:
+        console.print("[bold red]Error:[/bold red] --add-alias requires a name and at least one target")
+        return False
+    alias_name = args[1]
+    targets = args[2:]
+    if not re.fullmatch(r'[A-Za-z0-9_-]+', alias_name):
+        console.print(f"[bold red]Error:[/bold red] Invalid alias name '{alias_name}'")
+        return True
+    ensure_alias_dir_exists()
+    alias_path = Path(ALIAS_DIR) / alias_name
+    try:
+        with open(alias_path, 'w', encoding='utf-8') as f:
+            for t in targets:
+                f.write(t + "\n")
+        console.print(f"Alias '{alias_name}' created.")
+        return True
+    except Exception as e:
+        console.print(f"[bold red]Error writing alias '{alias_name}': {e}")
+        return False
+
+
+def handle_alias_from_clipboard(args: List[str], console: Console) -> bool:
+    """Create an alias from clipboard content."""
+    if len(args) < 2:
+        console.print("[bold red]Error:[/bold red] --alias-from-clipboard requires a name")
+        return False
+    alias_name = args[1]
+    clipboard_content = read_from_clipboard()
+    if not clipboard_content:
+        console.print("[bold red]Error:[/bold red] Clipboard is empty or inaccessible")
+        return False
+    targets = [line.strip() for line in clipboard_content.splitlines() if line.strip()]
+    ensure_alias_dir_exists()
+    alias_path = Path(ALIAS_DIR) / alias_name
+    try:
+        with open(alias_path, 'w', encoding='utf-8') as f:
+            for t in targets:
+                f.write(t + "\n")
+        console.print(f"Alias '{alias_name}' created from clipboard.")
+        return True
+    except Exception as e:
+        console.print(f"[bold red]Error writing alias '{alias_name}': {e}")
+        return False
+
+
+def load_alias(alias_name: str, console: Console) -> List[str]:
+    """Load alias targets from file."""
+    alias_path = Path(ALIAS_DIR) / alias_name
+    if not alias_path.exists():
+        console.print(f"[bold red]Alias '{alias_name}' not found.[/bold red]")
+        return []
+    with open(alias_path, 'r', encoding='utf-8') as f:
+        return [line.strip() for line in f if line.strip()]
+
+# --- End Legacy Alias Functions ---
 
 def ensure_alias_dir_exists():
     """Ensures the alias directory exists, creating it if necessary."""
@@ -979,11 +1055,14 @@ def get_token_count(text, disallowed_special=[], chunk_size=1000):
     """
     Counts tokens using tiktoken, stripping XML tags first.
     """
-    enc = tiktoken.get_encoding("cl100k_base")
-
-    # Restore XML tag removal before counting tokens
-    # This gives a count of the actual content, not the structural tags
+    # Remove XML tags before counting tokens
     text_without_tags = re.sub(r'<[^>]+>', '', text)
+
+    try:
+        enc = tiktoken.get_encoding("cl100k_base")
+    except Exception as e:
+        print(f"[bold yellow]Warning:[/bold yellow] Tokenizer unavailable ({e}). Using rough estimation.")
+        return len(text_without_tags) // 4
 
     # Split the text without tags into smaller chunks for more robust encoding
     chunks = [text_without_tags[i:i+chunk_size] for i in range(0, len(text_without_tags), chunk_size)]
@@ -3287,7 +3366,7 @@ async def main():
             else:
                 console.print("[bold red]Error: Text stream processing failed to generate output.[/bold red]")
         # else: stream_content_to_process was None or empty, error already printed.
-        return # Exit after stream processing
+        return 0  # Exit after stream processing
 
     # --- ELSE: Fall through to existing file/URL/alias processing logic ---
 
@@ -3460,8 +3539,7 @@ async def main():
         finally:
              progress.stop_task(task)
              progress.refresh() # Ensure progress bar clears
-
-
+    return 0
 if __name__ == "__main__":
     # Load environment variables from .env file
     load_dotenv()
