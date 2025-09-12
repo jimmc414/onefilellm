@@ -101,8 +101,8 @@
  |             Token Count Reporting         |                  |                     |
  |-------------------------------------------|                  |                     |
  | - Reports token count for both outputs    |                  |                     |
- | - Tiktoken.get_encoding()                 |                  |                     |
- | - Enc.encode()                            |                  |                     |
+| - Cached tiktoken encoding                |                  |                     |
+| - Enc.encode() / char estimate            |                  |                     |
  +-------------------------------------------+                  |                     |
                                                                 v
                                           +---------------------------------+
@@ -427,8 +427,8 @@ main
 |
 +--- get_token_count(text, disallowed_special=[], chunk_size=1000)
 |    |
-|    +--- tiktoken.get_encoding("cl100k_base")
-|    +--- enc.encode(chunk, disallowed_special=disallowed_special)
+|    +--- _get_cl100k_encoding()  (cached tiktoken encoding)
+|    +--- enc.encode(chunk, disallowed_special=disallowed_special) or estimate
 |
 +--- pyperclip.copy(uncompressed_text)
 ```
