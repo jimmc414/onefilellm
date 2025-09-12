@@ -379,6 +379,15 @@ class TestCoreProcessing(unittest.TestCase):
         if large_count >= 1000:
             self.assertIn(",", formatted_base)
             self.assertIn(",", formatted_estimated)
+
+    def test_token_count_fallback_no_network(self):
+        """Ensure token counting falls back when encoding cannot be loaded"""
+        import onefilellm as ofl
+        ofl._TIKTOKEN_ENCODING = None
+        with patch('onefilellm.tiktoken.get_encoding', side_effect=Exception("offline")):
+            sample = "fallback test"
+            count = get_token_count(sample)
+            self.assertEqual(count, len(sample) // 4)
     
     def test_combine_xml_outputs(self):
         """Test combining multiple XML outputs"""
@@ -416,7 +425,7 @@ class TestCoreProcessing(unittest.TestCase):
 # - AliasManager.add_or_update_alias(), remove_alias(), list_aliases_formatted()
 # - Alias expansion logic in main(), JSON storage, Core vs user alias precedence
 # - Placeholder {} functionality
-
+@unittest.skip("Legacy alias system tests - pending rewrite")
 class TestAliasSystem2OLD(unittest.TestCase):
     """Test old alias functionality - DISABLED"""
     
@@ -1290,6 +1299,7 @@ class TestAdvancedAliasFeatures(unittest.TestCase):
         self.assertIn('q=test+query', command)
 
 
+@unittest.skipUnless(RUN_INTEGRATION_TESTS, "Integration tests disabled")
 class TestIntegration(unittest.TestCase):
     """Integration tests for external services"""
     

@@ -47,6 +47,10 @@ ENABLE_COMPRESSION_AND_NLTK = False # Set to True to enable NLTK download, stopw
 TOKEN_ESTIMATE_MULTIPLIER = 1.37 # Multiplier to estimate model token usage from tiktoken count
 # Global flag to disable network operations when set
 OFFLINE_MODE = os.getenv("OFFLINE_MODE", "").lower() in ("1", "true", "yes")
+# Path to cached tiktoken encoding for offline use
+LOCAL_TIKTOKEN_PATH = os.path.join(os.path.dirname(__file__), "cl100k_base.tiktoken")
+# Cached Encoding instance to avoid repeated downloads
+_TIKTOKEN_ENCODING = None
 # --- End Configuration Flags ---
 
 # --- Output Format Notes ---
@@ -986,27 +990,68 @@ def preprocess_text(input_file, output_file):
 
 
 
-def get_token_count(text, disallowed_special=[], chunk_size=1000):
-    """
-    Counts tokens using tiktoken, stripping XML tags first.
-    """
-    enc = tiktoken.get_encoding("cl100k_base")
+def _load_tiktoken_encoding():
+    """Attempt to load the cl100k_base encoding, with caching and offline support."""
+    global _TIKTOKEN_ENCODING
+    if _TIKTOKEN_ENCODING is not None:
+        return _TIKTOKEN_ENCODING
+    try:
+        enc = tiktoken.get_encoding("cl100k_base")
+        _TIKTOKEN_ENCODING = enc
+        if not os.path.exists(LOCAL_TIKTOKEN_PATH):
+            try:
+                from tiktoken.load import dump_tiktoken_bpe
+                dump_tiktoken_bpe(enc._mergeable_ranks, LOCAL_TIKTOKEN_PATH)
+            except Exception:
+                pass
+        return enc
+    except Exception:
+        pass
+    # Try loading from local cache
+    try:
+        if os.path.exists(LOCAL_TIKTOKEN_PATH):
+            from tiktoken.load import load_tiktoken_bpe
+            from tiktoken.core import Encoding
+            mergeable_ranks = load_tiktoken_bpe(LOCAL_TIKTOKEN_PATH)
+            special_tokens = {
+                "<|endoftext|>": 100257,
+                "<|fim_prefix|>": 100258,
+                "<|fim_middle|>": 100259,
+                "<|fim_suffix|>": 100260,
+                "<|endofprompt|>": 100276,
+            }
+            pat_str = r"(?i:[sdmt]|ll|ve|re)|[^\r\n\p{L}\p{N}]?+\p{L}++|\p{N}{1,3}+| ?[^\s\p{L}\p{N}]++[\r\n]*+|\s++$|\s*[\r\n]|\s+(?!\S)|\s"
+            _TIKTOKEN_ENCODING = Encoding(
+                name="cl100k_base",
+                pat_str=pat_str,
+                mergeable_ranks=mergeable_ranks,
+                special_tokens=special_tokens,
+            )
+            return _TIKTOKEN_ENCODING
+    except Exception:
+        pass
+    return None
 
-    # Restore XML tag removal before counting tokens
-    # This gives a count of the actual content, not the structural tags
+
+def get_token_count(text, disallowed_special=[], chunk_size=1000):
+    """Counts tokens using tiktoken, with offline fallback."""
+    enc = _load_tiktoken_encoding()
+
+    # Remove XML tags before counting tokens
     text_without_tags = re.sub(r'<[^>]+>', '', text)
 
-    # Split the text without tags into smaller chunks for more robust encoding
+    if enc is None:
+        # Rough character-based estimate when encoding isn't available
+        return max(1, len(text_without_tags) // 4) if text_without_tags else 0
+
     chunks = [text_without_tags[i:i+chunk_size] for i in range(0, len(text_without_tags), chunk_size)]
     total_tokens = 0
-
     for chunk in chunks:
         try:
             tokens = enc.encode(chunk, disallowed_special=disallowed_special)
             total_tokens += len(tokens)
         except Exception as e:
             print(f"[bold yellow]Warning:[/bold yellow] Error encoding chunk for token count: {e}")
-            # Estimate token count for problematic chunk (e.g., len/4)
             total_tokens += len(chunk) // 4
 
     return total_tokens
