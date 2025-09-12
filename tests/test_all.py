@@ -542,7 +542,7 @@ class TestAliasSystem2(unittest.TestCase):
         self.alias_file = Path(self.temp_alias_dir) / "aliases.json"
         
         # Mock the alias configuration directory
-        self.config_dir_patcher = patch('onefilellm.ALIAS_CONFIG_DIR', Path(self.temp_alias_dir))
+        self.config_dir_patcher = patch('onefilellm.ALIAS_DIR', Path(self.temp_alias_dir))
         self.config_dir_patcher.start()
         
         # Mock the user aliases path
@@ -677,7 +677,7 @@ class TestAdvancedAliasFeatures(unittest.TestCase):
         self.alias_file = Path(self.temp_alias_dir) / "aliases.json"
         
         # Mock the alias configuration directory
-        self.config_dir_patcher = patch('onefilellm.ALIAS_CONFIG_DIR', Path(self.temp_alias_dir))
+        self.config_dir_patcher = patch('onefilellm.ALIAS_DIR', Path(self.temp_alias_dir))
         self.config_dir_patcher.start()
         
         # Mock the user aliases path
