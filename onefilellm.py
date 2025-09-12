@@ -3272,14 +3272,17 @@ async def main():
     stream_source_dict = {}
     stream_content_to_process = None
     user_format_override = args.format
-    
-    # Check for stdin input ('-' in inputs)
-    if '-' in args.inputs:
+
+    # Determine stdin usage
+    if '-' in (args.inputs or []):
         is_stream_input_mode = True
         stream_source_dict = {'type': 'stdin'}
         # Remove '-' from inputs list
         args.inputs = [inp for inp in args.inputs if inp != '-']
-    
+    elif not args.inputs and not sys.stdin.isatty():
+        is_stream_input_mode = True
+        stream_source_dict = {'type': 'stdin'}
+
     # Check for clipboard input
     elif args.clipboard:
         is_stream_input_mode = True
