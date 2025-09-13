@@ -326,7 +326,7 @@ class TestCoreProcessing(unittest.TestCase):
             mock_process.return_value = '<source type="local_file">Test content</source>'
             # Use a synchronous wrapper to test the async function
             import asyncio
-            result = asyncio.run(mock_process(test_file, None))
+            result = asyncio.run(mock_process(test_file, None, Console()))
             self.assertIn('<source type="local_file"', result)
             self.assertIn('Test content', result)
     
@@ -1481,7 +1481,7 @@ class TestErrorHandling(unittest.TestCase):
         with patch('onefilellm.process_input', new_callable=AsyncMock) as mock_process:
             mock_process.return_value = '<error>File not found</error>'
             import asyncio
-            result = asyncio.run(mock_process("/nonexistent/file/path.txt", None))
+            result = asyncio.run(mock_process("/nonexistent/file/path.txt", None, Console()))
             self.assertIn('error', result.lower())
     
     def test_invalid_url(self):
@@ -1490,7 +1490,7 @@ class TestErrorHandling(unittest.TestCase):
         with patch('onefilellm.process_input', new_callable=AsyncMock) as mock_process:
             mock_process.return_value = '<error>Invalid URL</error>'
             import asyncio
-            result = asyncio.run(mock_process("not_a_valid_url", None))
+            result = asyncio.run(mock_process("not_a_valid_url", None, Console()))
             self.assertIn('error', result.lower())
     
     def test_empty_input(self):
@@ -1555,7 +1555,7 @@ class TestPerformance(unittest.TestCase):
                 mock_process.return_value = '<source type="local_file">Large file content</source>'
                 start_time = time.time()
                 import asyncio
-                result = asyncio.run(mock_process(f.name, None))
+                result = asyncio.run(mock_process(f.name, None, Console()))
                 end_time = time.time()
                 
                 self.assertIn('<source type="local_file"', result)
@@ -1823,7 +1823,7 @@ class TestMultipleInputProcessing(unittest.TestCase):
             for input_item in inputs:
                 try:
                     import asyncio
-                    result = asyncio.run(mock_process(input_item, None))
+                    result = asyncio.run(mock_process(input_item, None, Console()))
                     results.append(result)
                 except Exception as e:
                     errors.append(str(e))
