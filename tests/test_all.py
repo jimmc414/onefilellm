@@ -338,7 +338,8 @@ class TestCoreProcessing(unittest.TestCase):
             with open(test_file, 'w') as f:
                 f.write(f"Content {i}")
         
-        result = process_local_folder(self.temp_dir)
+        console = Console()
+        result = process_local_folder(self.temp_dir, console)
         self.assertIn('<source type="local_folder"', result)
         for i in range(3):
             self.assertIn(f'Content {i}', result)

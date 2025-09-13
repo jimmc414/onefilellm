@@ -2,15 +2,17 @@ from flask import Flask, request, render_template_string, send_file
 import os
 import sys
 
-# Import functions from onefilellm.py. 
+# Import functions from onefilellm.py.
 # Ensure onefilellm.py is accessible in the same directory.
 from onefilellm import process_github_repo, process_github_pull_request, process_github_issue
 from onefilellm import process_arxiv_pdf, process_local_folder, fetch_youtube_transcript
 from onefilellm import crawl_and_extract_text, process_doi_or_pmid, get_token_count, preprocess_text, safe_file_read
 from pathlib import Path
 import pyperclip
+from rich.console import Console
 
 app = Flask(__name__)
+console = Console()
 
 # Simple HTML template using inline rendering for demonstration.
 template = """
@@ -88,7 +90,7 @@ def index():
             elif (input_path.startswith("10.") and "/" in input_path) or input_path.isdigit():
                 final_output = process_doi_or_pmid(input_path)
             else:
-                final_output = process_local_folder(input_path)
+                final_output = process_local_folder(input_path, console)
 
             # Write the uncompressed output
             with open(output_file, "w", encoding="utf-8") as file:
