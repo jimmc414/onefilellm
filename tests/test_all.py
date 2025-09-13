@@ -21,6 +21,8 @@ from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 
+import onefilellm
+
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -1507,6 +1509,35 @@ class TestErrorHandling(unittest.TestCase):
             self.assertIn('content', result)
             self.assertIn('Error processing page', result['content'])
 
+
+class TestOfflineMode(unittest.TestCase):
+    """Ensure network helpers honor OFFLINE_MODE."""
+
+    def setUp(self):
+        self._orig_offline = onefilellm.OFFLINE_MODE
+        onefilellm.OFFLINE_MODE = True
+
+    def tearDown(self):
+        onefilellm.OFFLINE_MODE = self._orig_offline
+
+    def test_fetch_youtube_transcript_offline(self):
+        with patch('subprocess.run') as mock_run:
+            result = fetch_youtube_transcript('https://www.youtube.com/watch?v=dQw4w9WgXcQ')
+        self.assertIn('Offline mode enabled', result)
+        mock_run.assert_not_called()
+
+    def test_process_doi_or_pmid_offline(self):
+        with patch('requests.post') as mock_post, patch('requests.get') as mock_get:
+            result = process_doi_or_pmid('10.1000/182')
+        self.assertIn('Offline mode enabled', result)
+        mock_post.assert_not_called()
+        mock_get.assert_not_called()
+
+    def test_process_github_repo_offline(self):
+        with patch('requests.get') as mock_get:
+            result = process_github_repo('https://github.com/user/repo')
+        self.assertIn('Offline mode enabled', result)
+        mock_get.assert_not_called()
 
 class TestPerformance(unittest.TestCase):
     """Performance and edge case tests"""

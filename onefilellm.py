@@ -342,6 +342,10 @@ def process_github_repo(repo_url):
     """
     Processes a GitHub repository, extracting file contents and wrapping them in XML structure.
     """
+    if OFFLINE_MODE:
+        msg = "Offline mode enabled; skipping GitHub repository fetch"
+        print(f"[bold yellow]{msg}[/bold yellow]")
+        return f'<source type="github_repository" url="{escape_xml(repo_url)}"><error>{escape_xml(msg)}</error></source>'
     api_base_url = "https://api.github.com/repos/"
     repo_url_parts = repo_url.split("https://github.com/")[-1].split("/")
     repo_name = "/".join(repo_url_parts[:2])
@@ -508,6 +512,10 @@ def _download_and_read_file(url):
     Downloads and reads the content of a file from a URL.
     Returns the content as text or an error message string.
     """
+    if OFFLINE_MODE:
+        msg = "Offline mode enabled; skipping download"
+        print(f"[bold yellow]{msg}[/bold yellow]")
+        return f"<e>{escape_xml(msg)}</e>"
     print(f"  Downloading and reading content from: {url}")
     try:
         # Add headers conditionally
@@ -674,6 +682,10 @@ def excel_to_markdown_from_url(
     ValueError, RuntimeError, RequestException
         Various errors that might occur during downloading or processing.
     """
+    if OFFLINE_MODE:
+        msg = "Offline mode enabled; skipping Excel download"
+        print(f"[bold yellow]{msg}[/bold yellow]")
+        raise RuntimeError(msg)
     import pandas as pd
     import io
     print(f"  Downloading Excel file from URL: {url}")
@@ -828,6 +840,10 @@ def fetch_youtube_transcript(url):
     if not video_id:
         print(f"[bold red]Could not extract YouTube video ID from URL: {url}[/bold red]")
         return f'<source type="youtube_transcript" url="{escape_xml(url)}">\n<error>Could not extract video ID from URL.</error>\n</source>'
+    if OFFLINE_MODE:
+        msg = "Offline mode enabled; skipping YouTube transcript fetch"
+        print(f"[bold yellow]{msg}[/bold yellow]")
+        return f'<source type="youtube_transcript" url="{escape_xml(url)}">\n<error>{escape_xml(msg)}</error>\n</source>'
 
     transcript_text = None
     error_msg = None
@@ -1781,6 +1797,10 @@ def process_doi_or_pmid(identifier):
     Attempts to fetch a paper PDF via Sci-Hub using DOI or PMID, wrapped in XML.
     Note: Sci-Hub access can be unreliable.
     """
+    if OFFLINE_MODE:
+        msg = "Offline mode enabled; skipping DOI/PMID lookup"
+        print(f"[bold yellow]{msg}[/bold yellow]")
+        return f'<source type="sci-hub" identifier="{escape_xml(identifier)}"><error>{escape_xml(msg)}</error></source>'
     # Use a more reliable Sci-Hub domain if known, otherwise fallback
     sci_hub_domains = ['https://sci-hub.se/', 'https://sci-hub.st/', 'https://sci-hub.ru/'] # Add more mirrors if needed
     pdf_filename = f"temp_{identifier.replace('/', '-')}.pdf"
@@ -1895,6 +1915,10 @@ def process_github_pull_request(pull_request_url):
     """
     Processes a GitHub Pull Request, including details, diff, comments, and associated repo content, wrapped in XML.
     """
+    if OFFLINE_MODE:
+        msg = "Offline mode enabled; skipping GitHub pull request fetch"
+        print(f"[bold yellow]{msg}[/bold yellow]")
+        return f'<source type="github_pull_request" url="{escape_xml(pull_request_url)}"><error>{escape_xml(msg)}</error></source>'
     if TOKEN == 'default_token_here':
          print("[bold red]Error:[/bold red] GitHub Token not set. Cannot process GitHub Pull Request.")
          return f'<source type="github_pull_request" url="{escape_xml(pull_request_url)}"><error>GitHub Token not configured.</error></source>'
@@ -2018,6 +2042,10 @@ def process_github_issue(issue_url):
     """
     Processes a GitHub Issue, including details, comments, and associated repo content, wrapped in XML.
     """
+    if OFFLINE_MODE:
+        msg = "Offline mode enabled; skipping GitHub issue fetch"
+        print(f"[bold yellow]{msg}[/bold yellow]")
+        return f'<source type="github_issue" url="{escape_xml(issue_url)}"><error>{escape_xml(msg)}</error></source>'
     if TOKEN == 'default_token_here':
          print("[bold red]Error:[/bold red] GitHub Token not set. Cannot process GitHub Issue.")
          return f'<source type="github_issue" url="{escape_xml(issue_url)}"><error>GitHub Token not configured.</error></source>'
@@ -2107,7 +2135,10 @@ def process_github_issues(issues_url):
     its comments will be included in the output and the repository content
     will be appended once at the end.
     """
-
+    if OFFLINE_MODE:
+        msg = "Offline mode enabled; skipping GitHub issues fetch"
+        print(f"[bold yellow]{msg}[/bold yellow]")
+        return f'<source type="github_issues" url="{escape_xml(issues_url)}"><error>{escape_xml(msg)}</error></source>'
     if TOKEN == 'default_token_here':
         print("[bold red]Error:[/bold red] GitHub Token not set. Cannot process GitHub Issues.")
         return f'<source type="github_issues" url="{escape_xml(issues_url)}"><error>GitHub Token not configured.</error></source>'
