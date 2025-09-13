@@ -413,11 +413,16 @@ def process_github_repo(repo_url):
     print("GitHub repository processing finished.")
     return "\n".join(repo_content)
 
-def process_local_folder(local_path):
+def process_local_folder(local_path, console: Console):
     """
     Processes a local directory, extracting file contents and wrapping them in XML structure.
+
+    Args:
+        local_path: Path to the local directory to process.
+        console: Rich Console instance for displaying progress and errors.
     """
-    def process_local_directory_recursive(current_path, content_list):
+
+    def process_local_directory_recursive(current_path, content_list, console):
         try:
             for item in os.listdir(current_path):
                 item_path = os.path.join(current_path, item)
@@ -425,10 +430,10 @@ def process_local_folder(local_path):
 
                 if os.path.isdir(item_path):
                     if item not in EXCLUDED_DIRS:
-                        process_local_directory_recursive(item_path, content_list)
+                        process_local_directory_recursive(item_path, content_list, console)
                 elif os.path.isfile(item_path):
                     if is_allowed_filetype(item):
-                        print(f"Processing {item_path}...")
+                        console.print(f"Processing {item_path}...")
                         content_list.append(f'\n<file path="{escape_xml(relative_path)}">')
                         try:
                             if item.lower().endswith(".ipynb"): # Case-insensitive check
@@ -447,7 +452,7 @@ def process_local_folder(local_path):
                                         content_list.append(md)      # raw Markdown table
                                         content_list.append('</file>')
                                 except Exception as e:
-                                    print(f"[bold red]Error processing Excel file {item_path}: {e}[/bold red]")
+                                    console.print(f"[bold red]Error processing Excel file {item_path}: {e}[/bold red]")
                                     # Re-add the original file tag for the error message
                                     content_list.append(f'\n<file path="{escape_xml(relative_path)}">')
                                     content_list.append(f'<e>Failed to process Excel file: {escape_xml(str(e))}</e>')
@@ -456,20 +461,20 @@ def process_local_folder(local_path):
                             else:
                                 content_list.append(safe_file_read(item_path))
                         except Exception as e:
-                            print(f"[bold red]Error reading file {item_path}: {e}[/bold red]")
+                            console.print(f"[bold red]Error reading file {item_path}: {e}[/bold red]")
                             content_list.append(f'<error>Failed to read file: {escape_xml(str(e))}</error>')
                         content_list.append('</file>')
         except Exception as e:
-             print(f"[bold red]Error reading directory {current_path}: {e}[/bold red]")
+             console.print(f"[bold red]Error reading directory {current_path}: {e}[/bold red]")
              content_list.append(f'<error>Failed reading directory {escape_xml(current_path)}: {escape_xml(str(e))}</error>')
 
 
     # Start XML structure
     content = [f'<source type="local_folder" path="{escape_xml(local_path)}">']
-    process_local_directory_recursive(local_path, content)
+    process_local_directory_recursive(local_path, content, console)
     content.append('\n</source>') # Close source tag
 
-    print("Local folder processing finished.")
+    console.print("Local folder processing finished.")
     return '\n'.join(content)
 
 
@@ -2323,7 +2328,7 @@ async def process_input(input_path, args, console, progress=None, task=None):
         elif (input_path.startswith("10.") and "/" in input_path) or input_path.isdigit():
             result = process_doi_or_pmid(input_path)
         elif os.path.isdir(input_path): # Check if it's a local directory
-            result = process_local_folder(input_path)
+            result = process_local_folder(input_path, console)
         elif os.path.isfile(input_path): # Handle single local file
             if input_path.lower().endswith('.pdf'): # Case-insensitive check
                 console.print(f"Processing single local PDF file: {input_path}") # Use console for consistency
