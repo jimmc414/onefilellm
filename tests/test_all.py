@@ -1510,6 +1510,29 @@ class TestErrorHandling(unittest.TestCase):
             self.assertIn('content', result)
             self.assertIn('Error processing page', result['content'])
 
+    def test_youtube_subprocess_failure(self):
+        """Simulate yt-dlp subprocess failure and verify error handling."""
+        import types
+
+        # Create a fake youtube_transcript_api module that always fails
+        fake_module = types.ModuleType("youtube_transcript_api")
+
+        class FakeYTA:
+            @staticmethod
+            def get_transcript(video_id):
+                raise Exception("api failure")
+
+        fake_module.YouTubeTranscriptApi = FakeYTA
+
+        with patch.dict('sys.modules', {"youtube_transcript_api": fake_module}), \
+             patch.object(onefilellm, "OFFLINE_MODE", False), \
+             patch('subprocess.run') as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(args=['yt-dlp'], returncode=1, stdout='', stderr='boom')
+            result = fetch_youtube_transcript('https://www.youtube.com/watch?v=dQw4w9WgXcQ')
+
+        self.assertIn('yt-dlp failed', result)
+        self.assertIn('boom', result)
+
 
 class TestOfflineMode(unittest.TestCase):
     """Ensure network helpers honor OFFLINE_MODE."""
