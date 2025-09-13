@@ -365,7 +365,7 @@ def process_github_repo(repo_url):
 
     def process_directory_recursive(url, repo_content_list):
         try:
-            response = requests.get(url, headers=headers)
+            response = requests.get(url, headers=headers, timeout=30)
             response.raise_for_status()
             files = response.json()
 
@@ -511,7 +511,7 @@ def _download_and_read_file(url):
     print(f"  Downloading and reading content from: {url}")
     try:
         # Add headers conditionally
-        response = requests.get(url, headers=headers if TOKEN != 'default_token_here' else None)
+        response = requests.get(url, headers=headers if TOKEN != 'default_token_here' else None, timeout=30)
         response.raise_for_status()
         
         # Try to determine encoding
@@ -680,7 +680,7 @@ def excel_to_markdown_from_url(
     
     try:
         # Add headers conditionally
-        response = requests.get(url, headers=headers if TOKEN != 'default_token_here' else None)
+        response = requests.get(url, headers=headers if TOKEN != 'default_token_here' else None, timeout=30)
         response.raise_for_status()
         
         # Create a BytesIO buffer from the downloaded content
@@ -774,7 +774,7 @@ def process_arxiv_pdf(arxiv_abs_url):
         return f'<source type="arxiv" url="{escape_xml(arxiv_abs_url)}"><error>{escape_xml(msg)}</error></source>'
     try:
         print(f"Downloading ArXiv PDF from {pdf_url}...")
-        response = requests.get(pdf_url)
+        response = requests.get(pdf_url, timeout=30)
         response.raise_for_status()
 
         with open(temp_pdf_path, 'wb') as pdf_file:
@@ -1913,7 +1913,7 @@ def process_github_pull_request(pull_request_url):
 
     try:
         print(f"Fetching PR data for: {pull_request_url}")
-        response = requests.get(api_base_url, headers=headers)
+        response = requests.get(api_base_url, headers=headers, timeout=30)
         response.raise_for_status()
         pull_request_data = response.json()
 
@@ -1936,12 +1936,16 @@ def process_github_pull_request(pull_request_url):
         diff_url = pull_request_data.get("diff_url")
         if diff_url:
             print("Fetching PR diff...")
-            diff_response = requests.get(diff_url, headers=headers)
-            diff_response.raise_for_status()
-            pull_request_diff = diff_response.text
-            formatted_text_list.append('\n<diff>')
-            formatted_text_list.append(pull_request_diff) # Append raw diff
-            formatted_text_list.append('</diff>')
+            try:
+                diff_response = requests.get(diff_url, headers=headers, timeout=30)
+                diff_response.raise_for_status()
+                pull_request_diff = diff_response.text
+                formatted_text_list.append('\n<diff>')
+                formatted_text_list.append(pull_request_diff) # Append raw diff
+                formatted_text_list.append('</diff>')
+            except requests.RequestException as e:
+                print(f"[bold yellow]Warning:[/bold yellow] Could not fetch PR diff: {e}")
+                formatted_text_list.append(f"\n<diff><error>Failed to fetch diff: {escape_xml(str(e))}</error></diff>")
         else:
              formatted_text_list.append('\n<diff><error>Could not retrieve diff URL.</error></diff>')
 
@@ -1953,19 +1957,21 @@ def process_github_pull_request(pull_request_url):
 
         if comments_url:
             print("Fetching PR comments...")
-            comments_response = requests.get(comments_url, headers=headers)
-            if comments_response.ok:
+            try:
+                comments_response = requests.get(comments_url, headers=headers, timeout=30)
+                comments_response.raise_for_status()
                 all_comments_data.extend(comments_response.json())
-            else:
-                 print(f"[bold yellow]Warning:[/bold yellow] Could not fetch PR comments: {comments_response.status_code}")
+            except requests.RequestException as e:
+                print(f"[bold yellow]Warning:[/bold yellow] Could not fetch PR comments: {e}")
 
         if review_comments_url:
              print("Fetching PR review comments...")
-             review_comments_response = requests.get(review_comments_url, headers=headers)
-             if review_comments_response.ok:
+             try:
+                 review_comments_response = requests.get(review_comments_url, headers=headers, timeout=30)
+                 review_comments_response.raise_for_status()
                  all_comments_data.extend(review_comments_response.json())
-             else:
-                 print(f"[bold yellow]Warning:[/bold yellow] Could not fetch review comments: {review_comments_response.status_code}")
+             except requests.RequestException as e:
+                 print(f"[bold yellow]Warning:[/bold yellow] Could not fetch review comments: {e}")
 
 
         if all_comments_data:
@@ -2030,7 +2036,7 @@ def process_github_issue(issue_url):
 
     try:
         print(f"Fetching issue data for: {issue_url}")
-        response = requests.get(api_base_url, headers=headers)
+        response = requests.get(api_base_url, headers=headers, timeout=30)
         response.raise_for_status()
         issue_data = response.json()
 
@@ -2053,11 +2059,12 @@ def process_github_issue(issue_url):
         comments_url = issue_data.get("comments_url")
         if comments_url:
             print("Fetching issue comments...")
-            comments_response = requests.get(comments_url, headers=headers)
-            if comments_response.ok:
-                 comments_data = comments_response.json()
-            else:
-                 print(f"[bold yellow]Warning:[/bold yellow] Could not fetch issue comments: {comments_response.status_code}")
+            try:
+                comments_response = requests.get(comments_url, headers=headers, timeout=30)
+                comments_response.raise_for_status()
+                comments_data = comments_response.json()
+            except requests.RequestException as e:
+                print(f"[bold yellow]Warning:[/bold yellow] Could not fetch issue comments: {e}")
 
 
         if comments_data:
@@ -2126,7 +2133,7 @@ def process_github_issues(issues_url):
     try:
         while True:
             params = {'state': state, 'per_page': 100, 'page': page}
-            response = requests.get(api_url, headers=headers, params=params)
+            response = requests.get(api_url, headers=headers, params=params, timeout=30)
             response.raise_for_status()
             batch = response.json()
             if not batch:
@@ -2159,9 +2166,12 @@ def process_github_issues(issues_url):
             comments_url = issue.get('comments_url')
             comments = []
             if comments_url:
-                comments_resp = requests.get(comments_url, headers=headers)
-                if comments_resp.ok:
+                try:
+                    comments_resp = requests.get(comments_url, headers=headers, timeout=30)
+                    comments_resp.raise_for_status()
                     comments = comments_resp.json()
+                except requests.RequestException as e:
+                    print(f"[bold yellow]Warning:[/bold yellow] Could not fetch issue comments: {e}")
 
             if comments:
                 formatted.append('<comments>')
