@@ -218,8 +218,12 @@ def download_file(url: str, target_path: str) -> None:
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     }
-    response = requests.get(url, headers=headers)
-    response.raise_for_status()
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+    except requests.RequestException as e:
+        print(f"Error downloading file from {url}: {e}")
+        raise
     with open(target_path, 'wb') as f:
         f.write(response.content)
 
