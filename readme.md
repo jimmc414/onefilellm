@@ -14,6 +14,15 @@ cd onefilellm
 pip install -r requirements.txt
 ```
 
+### Pip install
+
+OneFileLLM is also available as a pip package. You can install it directly and
+use both the CLI and Python API without cloning the repository:
+
+```bash
+pip install onefilellm
+```
+
 ## Command-Line Interface (CLI)
 
 This project can also be installed as a command-line tool, which allows you to run `onefilellm` directly from your terminal.
@@ -46,6 +55,17 @@ For GitHub API access (recommended):
 
 ```bash
 export GITHUB_TOKEN="your_personal_access_token"
+```
+
+## Python API
+
+After installing via pip, OneFileLLM can be invoked directly from Python code.
+
+```python
+from onefilellm import run
+
+# Process inputs programmatically
+run(["./docs/"])
 ```
 
 ## Command Help

@@ -3290,89 +3290,110 @@ REAL-WORLD USE CASES:
     return parser
 
 
-async def main():
+async def main(argv: Optional[List[str]] = None):
+    """Run OneFileLLM.
+
+    Parameters
+    ----------
+    argv : Optional[List[str]]
+        Arguments to parse, mimicking ``sys.argv[1:]``. If ``None``,
+        the actual command line arguments are used.
+
+    This parameter enables programmatic use from other Python modules by
+    allowing callers to specify their own argument list.
+    """
+
     console = Console()
     # Ensure Rich console is used for all prints for consistency
-    # For example, replace print() with console.print()
 
     # Initialize AliasManager
     alias_manager = AliasManager(console, CORE_ALIASES, USER_ALIASES_PATH)
     alias_manager.load_aliases() # Load aliases early
 
-    # --- Alias Expansion (before full argparse) ---
-    original_argv = sys.argv.copy()
-    if len(sys.argv) > 1 and not sys.argv[1].startswith('-'):
-        potential_alias_name = sys.argv[1]
-        command_str = alias_manager.get_command(potential_alias_name)
-        if command_str:
-            console.print(f"[dim]Alias '{potential_alias_name}' expands to: \"{command_str}\"[/dim]")
-            
-            # Placeholder logic
-            # User command: onefilellm alias_name [val_for_placeholder] [remaining_args...]
-            # sys.argv: [script_name, alias_name, val_for_placeholder?, remaining_args... ]
-            
-            placeholder_value_provided = len(original_argv) > 2
-            placeholder_value = original_argv[2] if placeholder_value_provided else ""
-            
-            # Check if "{}" placeholder exists anywhere in the command string
-            has_placeholder = "{}" in command_str
-            consumed_placeholder_arg = False
+    # If arguments are supplied programmatically, temporarily replace sys.argv
+    original_sys_argv = sys.argv.copy()
+    if argv is not None:
+        sys.argv = [sys.argv[0]] + list(argv)
 
-            if has_placeholder:
-                # Replace placeholder with the provided value (or empty string if none provided)
-                expanded_command_str = command_str.replace("{}", placeholder_value)
-                if placeholder_value_provided:
-                    consumed_placeholder_arg = True
-                # Determine where the rest of the original arguments start
-                remaining_args_start_index = 3 if consumed_placeholder_arg else 2
+    try:
+        # --- Alias Expansion (before full argparse) ---
+        original_argv = sys.argv.copy()
+        if len(sys.argv) > 1 and not sys.argv[1].startswith('-'):
+            potential_alias_name = sys.argv[1]
+            command_str = alias_manager.get_command(potential_alias_name)
+            if command_str:
+                console.print(f"[dim]Alias '{potential_alias_name}' expands to: \"{command_str}\"[/dim]")
+
+                # Placeholder logic
+                # User command: onefilellm alias_name [val_for_placeholder] [remaining_args...]
+                # sys.argv: [script_name, alias_name, val_for_placeholder?, remaining_args... ]
+
+                placeholder_value_provided = len(original_argv) > 2
+                placeholder_value = original_argv[2] if placeholder_value_provided else ""
+
+                # Check if "{}" placeholder exists anywhere in the command string
+                has_placeholder = "{}" in command_str
+                consumed_placeholder_arg = False
+
+                if has_placeholder:
+                    # Replace placeholder with the provided value (or empty string if none provided)
+                    expanded_command_str = command_str.replace("{}", placeholder_value)
+                    if placeholder_value_provided:
+                        consumed_placeholder_arg = True
+                    # Determine where the rest of the original arguments start
+                    remaining_args_start_index = 3 if consumed_placeholder_arg else 2
+                else:
+                    # No placeholder in alias command, use as-is
+                    expanded_command_str = command_str
+                    remaining_args_start_index = 2 # Args after alias name are appended
+
+                # Split the expanded command string into parts
+                expanded_base_parts = shlex.split(expanded_command_str)
+
+                sys.argv = [original_argv[0]] + expanded_base_parts + original_argv[remaining_args_start_index:]
+                console.print(f"[dim]Executing: onefilellm {' '.join(sys.argv[1:])}[/dim]")
+        # --- End Alias Expansion ---
+
+        parser = create_argument_parser()
+        args = parser.parse_args(sys.argv[1:]) # Use the potentially modified sys.argv
+
+        # --- Handle help options ---
+        if hasattr(args, 'help_topic') and args.help_topic is not None:
+            if args.help_topic == '':
+                show_interactive_help()
             else:
-                # No placeholder in alias command, use as-is
-                expanded_command_str = command_str
-                remaining_args_start_index = 2 # Args after alias name are appended
-
-            # Split the expanded command string into parts
-            expanded_base_parts = shlex.split(expanded_command_str)
-            
-            sys.argv = [original_argv[0]] + expanded_base_parts + original_argv[remaining_args_start_index:]
-            console.print(f"[dim]Executing: onefilellm {' '.join(sys.argv[1:])}[/dim]")
-    # --- End Alias Expansion ---
-
-    parser = create_argument_parser()
-    args = parser.parse_args(sys.argv[1:]) # Use the potentially modified sys.argv
-    
-    # --- Handle help options ---
-    if hasattr(args, 'help_topic') and args.help_topic is not None:
-        if args.help_topic == '':
-            show_interactive_help()
-        else:
-            show_interactive_help(args.help_topic)
-        return
-    
-    # --- Handle Alias Management CLI Commands ---
-    if args.alias_add:
-        if len(args.alias_add) < 2:
-            console.print("[bold red]Error:[/bold red] --alias-add requires at least two arguments: NAME and COMMAND_STRING")
+                show_interactive_help(args.help_topic)
             return
-        alias_name = args.alias_add[0]
-        command_string = ' '.join(args.alias_add[1:])
-        alias_manager.add_or_update_alias(alias_name, command_string)
-        return # Exit after managing alias
-    if args.alias_remove:
-        alias_manager.remove_alias(args.alias_remove)
-        return # Exit
-    if args.alias_list:
-        console.print("\n[bold]Effective Aliases (User overrides Core):[/bold]")
-        console.print(alias_manager.list_aliases_formatted(list_user=True, list_core=True))
-        return # Exit
-    if args.alias_list_core:
-        console.print("\n[bold]Core Aliases:[/bold]")
-        console.print(alias_manager.list_aliases_formatted(list_user=False, list_core=True))
-        return # Exit
     
-    # --- Handle stream input modes ---
-    is_stream_input_mode = False
-    stream_source_dict = {}
-    stream_content_to_process = None
+        # --- Handle Alias Management CLI Commands ---
+        if args.alias_add:
+            if len(args.alias_add) < 2:
+                console.print("[bold red]Error:[/bold red] --alias-add requires at least two arguments: NAME and COMMAND_STRING")
+                return
+            alias_name = args.alias_add[0]
+            command_string = ' '.join(args.alias_add[1:])
+            alias_manager.add_or_update_alias(alias_name, command_string)
+            return # Exit after managing alias
+        if args.alias_remove:
+            alias_manager.remove_alias(args.alias_remove)
+            return # Exit
+        if args.alias_list:
+            console.print("\n[bold]Effective Aliases (User overrides Core):[/bold]")
+            console.print(alias_manager.list_aliases_formatted(list_user=True, list_core=True))
+            return # Exit
+        if args.alias_list_core:
+            console.print("\n[bold]Core Aliases:[/bold]")
+            console.print(alias_manager.list_aliases_formatted(list_user=False, list_core=True))
+            return # Exit
+
+        # --- Handle stream input modes ---
+        is_stream_input_mode = False
+        stream_source_dict = {}
+        stream_content_to_process = None
+
+    finally:
+        # Restore original sys.argv if it was modified
+        sys.argv = original_sys_argv
     user_format_override = args.format
 
     # Determine stdin usage
@@ -3635,6 +3656,22 @@ async def main():
         finally:
              progress.stop_task(task)
              progress.refresh() # Ensure progress bar clears
+
+
+def run(args: Optional[List[str]] = None) -> None:
+    """Execute OneFileLLM with an optional list of arguments.
+
+    This is a thin wrapper around :func:`main` that runs the asynchronous
+    pipeline using :func:`asyncio.run`, enabling straightforward use from
+    regular (synchronous) Python code:
+
+    ```python
+    from onefilellm import run
+    run(["docs/"])
+    ```
+    """
+
+    asyncio.run(main(args))
 
 
 if __name__ == "__main__":
