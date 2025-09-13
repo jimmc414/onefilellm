@@ -2257,12 +2257,11 @@ def combine_xml_outputs(outputs):
     
     return '\n'.join(combined)
 
-async def process_input(input_path, args, progress=None, task=None):
+async def process_input(input_path, args, console, progress=None, task=None):
     """
     Process a single input path and return the XML output.
     Extracted from main() for reuse with multiple inputs.
     """
-    console = Console()
     urls_list_file = "processed_urls.txt"
     
     try:
@@ -2287,7 +2286,7 @@ async def process_input(input_path, args, progress=None, task=None):
                 result = process_arxiv_pdf(input_path)
             elif input_path.lower().endswith(('.pdf')): # Direct PDF link
                 # Simplified: wrap direct PDF processing if needed, or treat as web crawl
-                print("[bold yellow]Direct PDF URL detected - treating as single-page crawl.[/bold yellow]")
+                console.print("[bold yellow]Direct PDF URL detected - treating as single-page crawl.[/bold yellow]")
                 crawl_result = crawl_and_extract_text(input_path, max_depth=0, include_pdfs=True, ignore_epubs=True)
                 result = crawl_result['content']
                 if crawl_result['processed_urls']:
@@ -3612,7 +3611,7 @@ async def main(argv: Optional[List[str]] = None):
         try:
             # Process each input path
             for input_path in input_paths:
-                result = await process_input(input_path, args, progress, task)
+                result = await process_input(input_path, args, console, progress, task)
                 if result:
                     outputs.append(result)
                     console.print(f"[green]Successfully processed: {input_path}[/green]")
