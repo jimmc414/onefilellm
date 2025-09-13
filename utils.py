@@ -219,13 +219,14 @@ def download_file(url: str, target_path: str) -> None:
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     }
     try:
-        response = requests.get(url, headers=headers, timeout=30)
-        response.raise_for_status()
+        with requests.get(url, headers=headers, timeout=30, stream=True) as response:
+            response.raise_for_status()
+            with open(target_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
     except requests.RequestException as e:
         print(f"Error downloading file from {url}: {e}")
-        raise
-    with open(target_path, 'wb') as f:
-        f.write(response.content)
 
 
 def is_same_domain(base_url: str, new_url: str) -> bool:
