@@ -12,6 +12,7 @@ import tempfile
 import shutil
 import time
 import subprocess
+import io
 from pathlib import Path
 from unittest.mock import patch, MagicMock, AsyncMock
 import requests
@@ -303,6 +304,48 @@ class TestStreamProcessing(unittest.TestCase):
         mock_stdin.return_value = None
         result = read_from_stdin()
         self.assertIsNone(result)
+
+
+class TestProcessInputFileURLs(unittest.TestCase):
+    """Test direct file URL handling in process_input"""
+
+    def setUp(self):
+        self.console = Console(file=io.StringIO())
+        self.args = type('Args', (), {})()
+
+    def test_direct_file_url_multiple_types(self):
+        """Ensure direct file URLs for allowed types are processed directly"""
+        import asyncio
+        for ext in ['.txt', '.md', '.py']:
+            url = f'http://example.com/test{ext}'
+            with patch('onefilellm._download_and_read_file', return_value='content'), \
+                 patch('onefilellm.process_web_crawl', new_callable=AsyncMock) as mock_crawl:
+                result = asyncio.run(process_input(url, self.args, self.console))
+                self.assertIn('<source type="web_file"', result)
+                self.assertIn(f'test{ext}', result)
+                mock_crawl.assert_not_called()
+
+    def test_disallowed_extension_uses_crawler(self):
+        """Ensure disallowed extensions bypass direct processing"""
+        import asyncio
+        url = 'http://example.com/file.pdf'
+        fake_crawl = {'content': 'pdf content', 'processed_urls': []}
+        with patch('onefilellm.crawl_and_extract_text', return_value=fake_crawl), \
+             patch('onefilellm._download_and_read_file') as mock_download:
+            result = asyncio.run(process_input(url, self.args, self.console))
+            self.assertIn('pdf content', result)
+            mock_download.assert_not_called()
+
+    def test_unallowed_extension_uses_web_crawl(self):
+        """Ensure unallowed extensions trigger web crawl"""
+        import asyncio
+        url = 'http://example.com/file.exe'
+        with patch('onefilellm.process_web_crawl', new_callable=AsyncMock, return_value='crawl result') as mock_crawl, \
+             patch('onefilellm._download_and_read_file') as mock_download:
+            result = asyncio.run(process_input(url, self.args, self.console))
+            self.assertEqual(result, 'crawl result')
+            mock_download.assert_not_called()
+            mock_crawl.assert_awaited_once()
 
 
 class TestCoreProcessing(unittest.TestCase):

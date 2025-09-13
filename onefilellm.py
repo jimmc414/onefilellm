@@ -64,6 +64,9 @@ _TIKTOKEN_ENCODING = None
 # --- Configuration Directories ---
 EXCLUDED_DIRS = ["dist", "node_modules", ".git", "__pycache__"]
 
+# Extensions to skip when processing direct file URLs
+DISALLOWED_EXTENSIONS = {'.pdf'}
+
 # --- Alias Configuration ---
 ALIAS_DIR_NAME = ".onefilellm_aliases"  # Re-use existing constant
 ALIAS_DIR = Path.home() / ALIAS_DIR_NAME
@@ -2318,21 +2321,24 @@ async def process_input(input_path, args, console, progress=None, task=None):
                 except Exception as e:
                     console.print(f"[bold red]Error processing Excel URL {input_path}: {e}[/bold red]")
                     result = f'<source type="web_excel" url="{escape_xml(input_path)}"><e>Failed to process Excel file: {escape_xml(str(e))}</e></source>'
-            # Process URL directly if it ends with a recognized file extension
-            elif any(input_path.lower().endswith(ext) for ext in [ext for ext in ['.txt', '.md', '.bat', '.cmd', '.html', '.htm', '.css', '.js', '.ts', '.py', '.java', '.c', '.cpp', '.h', '.hpp', '.cs', '.rb', '.php', '.swift', '.kt', '.scala', '.rs', '.lua', '.pl', '.sh', '.bash', '.zsh', '.ps1', '.sql', '.groovy', '.dart', '.json', '.yaml', '.yml', '.xml', '.toml', '.ini', '.cfg', '.conf', '.properties', '.csv', '.tsv', '.proto', '.graphql', '.tf', '.tfvars', '.hcl'] if is_allowed_filetype(f"test{ext}")] if ext != '.pdf'):
-                console.print(f"Processing direct file URL: {input_path}")
-                file_content = _download_and_read_file(input_path)
+            else:
                 filename = os.path.basename(urlparse(input_path).path)
-                result = (f'<source type="web_file" url="{escape_xml(input_path)}">\n'
-                         f'<file path="{escape_xml(filename)}">\n'
-                         f'{file_content}\n'
-                         f'</file>\n'
-                         f'</source>')
-            else: # Assume general web URL for crawling
-                # Use the new async DocCrawler
-                result = await process_web_crawl(input_path, args, console, progress)
-                # Note: The new crawler doesn't return processed_urls separately,
-                # they're included in the XML output if needed
+                file_ext = os.path.splitext(filename)[1].lower()
+
+                # Process URL directly if it ends with a recognized file extension
+                if is_allowed_filetype(filename) and file_ext not in DISALLOWED_EXTENSIONS:
+                    console.print(f"Processing direct file URL: {input_path}")
+                    file_content = _download_and_read_file(input_path)
+                    result = (f'<source type="web_file" url="{escape_xml(input_path)}">\n'
+                             f'<file path="{escape_xml(filename)}">\n'
+                             f'{file_content}\n'
+                             f'</file>\n'
+                             f'</source>')
+                else: # Assume general web URL for crawling
+                    # Use the new async DocCrawler
+                    result = await process_web_crawl(input_path, args, console, progress)
+                    # Note: The new crawler doesn't return processed_urls separately,
+                    # they're included in the XML output if needed
         # Basic check for DOI (starts with 10.) or PMID (all digits)
         elif (input_path.startswith("10.") and "/" in input_path) or input_path.isdigit():
             result = process_doi_or_pmid(input_path)
