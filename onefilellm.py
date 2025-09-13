@@ -872,35 +872,44 @@ def fetch_youtube_transcript(url):
             
             # Run yt-dlp
             result = subprocess.run(cmd, capture_output=True, text=True)
-            
-            # Look for subtitle files
-            subtitle_files = []
-            for ext in ['.en.vtt', '.en.srt', '.vtt', '.srt']:
-                subtitle_path = os.path.join(temp_dir, f"{video_id}{ext}")
-                if os.path.exists(subtitle_path):
-                    subtitle_files.append(subtitle_path)
-            
-            if subtitle_files:
-                # Read the first available subtitle file
-                with open(subtitle_files[0], 'r', encoding='utf-8') as f:
-                    content = f.read()
-                
-                # Parse VTT or SRT format to extract just the text
-                lines = content.split('\n')
-                transcript_lines = []
-                
-                for line in lines:
-                    # Skip timestamp lines and empty lines
-                    if '-->' not in line and line.strip() and not line.strip().isdigit() and not line.startswith('WEBVTT'):
-                        # Remove HTML tags if present
-                        clean_line = re.sub(r'<[^>]+>', '', line)
-                        if clean_line.strip():
-                            transcript_lines.append(clean_line.strip())
-                
-                transcript_text = ' '.join(transcript_lines)
-                print(f"Transcript fetched successfully using yt-dlp. Got {len(transcript_lines)} lines.")
+
+            if result.returncode != 0:
+                # Capture stderr for more informative error messages
+                stderr = result.stderr.strip() if result.stderr else ""
+                error_msg = (
+                    f"yt-dlp failed with exit code {result.returncode}: {stderr}"
+                    if stderr
+                    else f"yt-dlp failed with exit code {result.returncode}"
+                )
             else:
-                error_msg = "No subtitle files found"
+                # Look for subtitle files
+                subtitle_files = []
+                for ext in ['.en.vtt', '.en.srt', '.vtt', '.srt']:
+                    subtitle_path = os.path.join(temp_dir, f"{video_id}{ext}")
+                    if os.path.exists(subtitle_path):
+                        subtitle_files.append(subtitle_path)
+
+                if subtitle_files:
+                    # Read the first available subtitle file
+                    with open(subtitle_files[0], 'r', encoding='utf-8') as f:
+                        content = f.read()
+
+                    # Parse VTT or SRT format to extract just the text
+                    lines = content.split('\n')
+                    transcript_lines = []
+
+                    for line in lines:
+                        # Skip timestamp lines and empty lines
+                        if '-->' not in line and line.strip() and not line.strip().isdigit() and not line.startswith('WEBVTT'):
+                            # Remove HTML tags if present
+                            clean_line = re.sub(r'<[^>]+>', '', line)
+                            if clean_line.strip():
+                                transcript_lines.append(clean_line.strip())
+
+                    transcript_text = ' '.join(transcript_lines)
+                    print(f"Transcript fetched successfully using yt-dlp. Got {len(transcript_lines)} lines.")
+                else:
+                    error_msg = "No subtitle files found"
                 
     except FileNotFoundError:
         error_msg = "yt-dlp not found. Please install it with: pip install yt-dlp"

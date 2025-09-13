@@ -364,3 +364,13 @@ python onefilellm.py --help-topic examples   # Advanced usage patterns
 python onefilellm.py --help-topic config     # Environment and configuration
 ```
 
+## Troubleshooting
+
+- **YouTube transcript errors**: Fetching YouTube transcripts requires the
+  [`yt-dlp`](https://github.com/yt-dlp/yt-dlp) tool. If you see errors about
+  `yt-dlp` not being found or failing, install it with:
+
+  ```bash
+  pip install yt-dlp
+  ```
+
