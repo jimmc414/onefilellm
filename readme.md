@@ -99,10 +99,20 @@ python onefilellm.py large_dataset.csv logs/ --format text
 python onefilellm.py https://github.com/microsoft/vscode
 python onefilellm.py https://github.com/openai/whisper/tree/main/whisper
 python onefilellm.py https://github.com/microsoft/vscode/pull/12345
-python onefilellm.py https://github.com/kubernetes/kubernetes/issues
+python onefilellm.py https://github.com/kubernetes/kubernetes/issues?state=all
 python onefilellm.py https://github.com/kubernetes/kubernetes/issues?state=open
 python onefilellm.py https://github.com/kubernetes/kubernetes/issues?state=closed
 ```
+
+You can retrieve issues for a repository by specifying the `state` query parameter.
+Use `state=all` (default) to fetch all issues, `state=open` for open issues only,
+or `state=closed` for closed issues.
+
+#### Using Specific Branches or Tags
+
+**Is it possible to use this tool with different branches on a GitHub repository?**
+
+Yes. When you supply a GitHub URL that includes a branch (e.g., https://github.com/openai/whisper/tree/main/whisper), the tool parses the `tree/` portion and sends the request with a `ref` parameter so that the specified branch or tag is retrieved. 
 
 ### Web Documentation and APIs
 ```bash
