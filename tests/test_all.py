@@ -1539,6 +1539,61 @@ class TestOfflineMode(unittest.TestCase):
         self.assertIn('Offline mode enabled', result)
         mock_get.assert_not_called()
 
+
+class TestTemporaryFileCollisions(unittest.TestCase):
+    """Ensure temporary file handling avoids name collisions."""
+
+    def setUp(self):
+        self.orig_offline = onefilellm.OFFLINE_MODE
+        onefilellm.OFFLINE_MODE = False
+
+    def tearDown(self):
+        onefilellm.OFFLINE_MODE = self.orig_offline
+
+    def test_duplicate_filenames(self):
+        repo_url = 'https://github.com/user/repo'
+
+        def mock_requests_get(url, headers=None, timeout=30):
+            response = MagicMock()
+            if url == 'https://api.github.com/repos/user/repo/contents':
+                response.json.return_value = [
+                    {"type": "dir", "name": "dir1", "url": "url_dir1"},
+                    {"type": "dir", "name": "dir2", "url": "url_dir2"},
+                ]
+            elif url == 'url_dir1':
+                response.json.return_value = [
+                    {"type": "file", "name": "same.txt", "path": "dir1/same.txt", "download_url": "url1"}
+                ]
+            elif url == 'url_dir2':
+                response.json.return_value = [
+                    {"type": "file", "name": "same.txt", "path": "dir2/same.txt", "download_url": "url2"}
+                ]
+            else:
+                raise AssertionError(f'Unexpected URL {url}')
+            response.raise_for_status = MagicMock()
+            return response
+
+        download_paths = []
+
+        def mock_download_file(url, target_path):
+            download_paths.append(target_path)
+            with open(target_path, 'wb') as f:
+                if url == 'url1':
+                    f.write(b'content1')
+                elif url == 'url2':
+                    f.write(b'content2')
+
+        with patch('onefilellm.requests.get', side_effect=mock_requests_get), \
+             patch('onefilellm.download_file', side_effect=mock_download_file):
+            result = process_github_repo(repo_url)
+
+        self.assertIn('content1', result)
+        self.assertIn('content2', result)
+        self.assertEqual(len(download_paths), 2)
+        self.assertEqual(len(set(download_paths)), 2)
+        for path in download_paths:
+            self.assertFalse(os.path.exists(path))
+
 class TestPerformance(unittest.TestCase):
     """Performance and edge case tests"""
     

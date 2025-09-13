@@ -25,6 +25,7 @@ from urllib.robotparser import RobotFileParser
 from readability import Document
 import io
 import argparse
+import tempfile
 
 # Import utility functions
 from utils import (
@@ -379,25 +380,23 @@ def process_github_repo(repo_url):
 
                 if file_info["type"] == "file" and is_allowed_filetype(file_info["name"]):
                     print(f"Processing {file_info['path']}...")
-                    temp_file = f"temp_{file_info['name']}"
-                    try:
-                        download_file(file_info["download_url"], temp_file)
-                        repo_content_list.append(f'\n<file path="{escape_xml(file_info["path"])}">')
-                        if file_info["name"].endswith(".ipynb"):
-                            # Append raw code - escape_xml not needed as it does nothing
-                            repo_content_list.append(process_ipynb_file(temp_file))
-                        else:
-                            # Append raw code - escape_xml not needed here
-                            repo_content_list.append(safe_file_read(temp_file))
-                        repo_content_list.append('</file>')
-                    except Exception as e:
-                        print(f"[bold red]Error processing file {file_info['path']}: {e}[/bold red]")
-                        repo_content_list.append(f'\n<file path="{escape_xml(file_info["path"])}">')
-                        repo_content_list.append(f'<error>Failed to download or process: {escape_xml(str(e))}</error>')
-                        repo_content_list.append('</file>')
-                    finally:
-                        if os.path.exists(temp_file):
-                            os.remove(temp_file)
+                    with tempfile.TemporaryDirectory() as temp_dir:
+                        temp_file = os.path.join(temp_dir, file_info["name"])
+                        try:
+                            download_file(file_info["download_url"], temp_file)
+                            repo_content_list.append(f'\n<file path="{escape_xml(file_info["path"])}">')
+                            if file_info["name"].endswith(".ipynb"):
+                                # Append raw code - escape_xml not needed as it does nothing
+                                repo_content_list.append(process_ipynb_file(temp_file))
+                            else:
+                                # Append raw code - escape_xml not needed here
+                                repo_content_list.append(safe_file_read(temp_file))
+                            repo_content_list.append('</file>')
+                        except Exception as e:
+                            print(f"[bold red]Error processing file {file_info['path']}: {e}[/bold red]")
+                            repo_content_list.append(f'\n<file path="{escape_xml(file_info["path"])}">')
+                            repo_content_list.append(f'<error>Failed to download or process: {escape_xml(str(e))}</error>')
+                            repo_content_list.append('</file>')
 
                 elif file_info["type"] == "dir":
                     process_directory_recursive(file_info["url"], repo_content_list)
@@ -779,7 +778,6 @@ def process_arxiv_pdf(arxiv_abs_url):
     Downloads and extracts text from an ArXiv PDF, wrapped in XML.
     """
     pdf_url = arxiv_abs_url.replace("/abs/", "/pdf/") + ".pdf"
-    temp_pdf_path = 'temp_arxiv.pdf'
     if OFFLINE_MODE:
         msg = "Offline mode enabled; skipping ArXiv download"
         print(f"[bold yellow]{msg}[/bold yellow]")
@@ -789,26 +787,27 @@ def process_arxiv_pdf(arxiv_abs_url):
         response = requests.get(pdf_url, timeout=30)
         response.raise_for_status()
 
-        with open(temp_pdf_path, 'wb') as pdf_file:
-            pdf_file.write(response.content)
+        with tempfile.NamedTemporaryFile(suffix='.pdf') as temp_pdf:
+            temp_pdf.write(response.content)
+            temp_pdf.flush()
 
-        print("Extracting text from PDF...")
-        text_list = []
-        from PyPDF2 import PdfReader
-        with open(temp_pdf_path, 'rb') as pdf_file:
-            pdf_reader = PdfReader(pdf_file)
+            print("Extracting text from PDF...")
+            text_list = []
+            from PyPDF2 import PdfReader
+            temp_pdf.seek(0)
+            pdf_reader = PdfReader(temp_pdf)
             for i, page in enumerate(range(len(pdf_reader.pages))):
                 print(f"  Processing page {i+1}/{len(pdf_reader.pages)}")
                 page_text = pdf_reader.pages[page].extract_text()
                 if page_text: # Add text only if extraction was successful
                     text_list.append(page_text)
 
-        # Use XML structure
-        formatted_text = f'<source type="arxiv" url="{escape_xml(arxiv_abs_url)}">\n'
-        formatted_text += ' '.join(text_list) # Append raw extracted text
-        formatted_text += '\n</source>' # Close source tag
-        print("ArXiv paper processed successfully.")
-        return formatted_text
+            # Use XML structure
+            formatted_text = f'<source type="arxiv" url="{escape_xml(arxiv_abs_url)}">\n'
+            formatted_text += ' '.join(text_list) # Append raw extracted text
+            formatted_text += '\n</source>' # Close source tag
+            print("ArXiv paper processed successfully.")
+            return formatted_text
 
     except requests.exceptions.ProxyError as e:
         print(f"[bold red]Proxy error downloading ArXiv PDF {pdf_url}: {e}[/bold red]")
@@ -819,9 +818,6 @@ def process_arxiv_pdf(arxiv_abs_url):
     except Exception as e: # Catch PdfReader errors or others
         print(f"[bold red]Error processing ArXiv PDF {arxiv_abs_url}: {e}[/bold red]")
         return f'<source type="arxiv" url="{escape_xml(arxiv_abs_url)}"><error>Failed to process PDF: {escape_xml(str(e))}</error></source>'
-    finally:
-        if os.path.exists(temp_pdf_path):
-            os.remove(temp_pdf_path)
 
 
 def fetch_youtube_transcript(url):
@@ -1075,7 +1071,6 @@ def get_token_count(text, disallowed_special=[], chunk_size=1000):
 
 def process_web_pdf(url):
     """Downloads and extracts text from a PDF found during web crawl."""
-    temp_pdf_path = 'temp_web.pdf'
     try:
         print(f"  Downloading PDF: {url}")
         response = requests.get(url, timeout=30) # Add timeout
@@ -1086,14 +1081,15 @@ def process_web_pdf(url):
              print(f"  [bold yellow]Warning:[/bold yellow] URL doesn't report as PDF, skipping: {url}")
              return None # Or return an error string
 
-        with open(temp_pdf_path, 'wb') as pdf_file:
-            pdf_file.write(response.content)
+        with tempfile.NamedTemporaryFile(suffix='.pdf') as temp_pdf:
+            temp_pdf.write(response.content)
+            temp_pdf.flush()
 
-        print(f"  Extracting text from PDF: {url}")
-        text_list = []
-        from PyPDF2 import PdfReader
-        with open(temp_pdf_path, 'rb') as pdf_file:
-            pdf_reader = PdfReader(pdf_file)
+            print(f"  Extracting text from PDF: {url}")
+            text_list = []
+            from PyPDF2 import PdfReader
+            temp_pdf.seek(0)
+            pdf_reader = PdfReader(temp_pdf)
             for page in range(len(pdf_reader.pages)):
                 page_text = pdf_reader.pages[page].extract_text()
                 if page_text:
@@ -1108,9 +1104,6 @@ def process_web_pdf(url):
     except Exception as e:
         print(f"  [bold red]Error processing PDF {url}: {e}[/bold red]")
         return f"<error>Failed to process PDF: {escape_xml(str(e))}</error>"
-    finally:
-        if os.path.exists(temp_pdf_path):
-            os.remove(temp_pdf_path)
 
 
 def crawl_and_extract_text(base_url, max_depth, include_pdfs, ignore_epubs):
@@ -1803,7 +1796,6 @@ def process_doi_or_pmid(identifier):
         return f'<source type="sci-hub" identifier="{escape_xml(identifier)}"><error>{escape_xml(msg)}</error></source>'
     # Use a more reliable Sci-Hub domain if known, otherwise fallback
     sci_hub_domains = ['https://sci-hub.se/', 'https://sci-hub.st/', 'https://sci-hub.ru/'] # Add more mirrors if needed
-    pdf_filename = f"temp_{identifier.replace('/', '-')}.pdf"
     pdf_text = None
 
     for base_url in sci_hub_domains:
@@ -1863,14 +1855,14 @@ def process_doi_or_pmid(identifier):
                  print(f"  [bold yellow]Warning:[/bold yellow] Downloaded content is not PDF from {pdf_url}, trying next domain.")
                  continue
 
+            with tempfile.NamedTemporaryFile(suffix='.pdf') as temp_pdf:
+                temp_pdf.write(pdf_response.content)
+                temp_pdf.flush()
 
-            with open(pdf_filename, 'wb') as f:
-                f.write(pdf_response.content)
-
-            print("  Extracting text from PDF...")
-            from PyPDF2 import PdfReader
-            with open(pdf_filename, 'rb') as pdf_file:
-                pdf_reader = PdfReader(pdf_file)
+                print("  Extracting text from PDF...")
+                from PyPDF2 import PdfReader
+                temp_pdf.seek(0)
+                pdf_reader = PdfReader(temp_pdf)
                 text_list = []
                 for page in range(len(pdf_reader.pages)):
                     page_text = pdf_reader.pages[page].extract_text()
@@ -1890,10 +1882,6 @@ def process_doi_or_pmid(identifier):
         except Exception as e: # Catch other errors (PDF parsing, etc.)
              print(f"  Error processing identifier {identifier} with {base_url}: {e}")
              continue # Try next domain
-        finally:
-             # Clean up temp file even if loop continues
-             if os.path.exists(pdf_filename):
-                 os.remove(pdf_filename)
 
     # After trying all domains
     if pdf_text is not None:
