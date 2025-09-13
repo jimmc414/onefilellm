@@ -14,6 +14,7 @@ import time
 import subprocess
 from pathlib import Path
 from unittest.mock import patch, MagicMock, AsyncMock
+import requests
 import pandas as pd
 import pyperclip
 from rich.console import Console
@@ -153,6 +154,38 @@ class TestUtilityFunctions(unittest.TestCase):
         """Test XML escaping (currently returns unchanged)"""
         text = "<tag>Content & more</tag>"
         self.assertEqual(escape_xml(text), text)
+
+    def test_download_file_stream_and_error_handling(self):
+        """Test streaming download and graceful error handling"""
+        url = "http://example.com/file"
+        target_path = os.path.join(self.temp_dir, "download.bin")
+
+        # Successful download with streaming
+        with patch("utils.requests.get") as mock_get:
+            mock_response = MagicMock()
+            mock_response.iter_content.return_value = [b"foo", b"bar"]
+            mock_response.raise_for_status = MagicMock()
+            mock_get.return_value.__enter__.return_value = mock_response
+
+            download_file(url, target_path)
+
+            with open(target_path, "rb") as f:
+                self.assertEqual(f.read(), b"foobar")
+
+            mock_get.assert_called_once_with(
+                url,
+                headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'},
+                timeout=30,
+                stream=True,
+            )
+
+        # Error handling: ensure no exception and file not created
+        error_path = os.path.join(self.temp_dir, "error.bin")
+        with patch("utils.requests.get", side_effect=requests.RequestException("boom")), \
+             patch("builtins.print") as mock_print:
+            download_file(url, error_path)
+            self.assertFalse(os.path.exists(error_path))
+            self.assertTrue(mock_print.called)
 
 
 class TestTextFormatDetection(unittest.TestCase):
