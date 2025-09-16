@@ -1593,6 +1593,13 @@ class TestOfflineMode(unittest.TestCase):
         self.assertIn('Offline mode enabled', result)
         mock_run.assert_not_called()
 
+    def test_fetch_youtube_transcript_offline_live_url(self):
+        with patch('subprocess.run') as mock_run:
+            result = fetch_youtube_transcript('https://www.youtube.com/live/czVBmqZP6Ss')
+        self.assertIn('Offline mode enabled', result)
+        self.assertNotIn('Could not extract video ID', result)
+        mock_run.assert_not_called()
+
     def test_process_doi_or_pmid_offline(self):
         with patch('requests.post') as mock_post, patch('requests.get') as mock_get:
             result = process_doi_or_pmid('10.1000/182')
