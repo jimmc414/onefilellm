@@ -836,6 +836,41 @@ def fetch_youtube_transcript(url):
     import subprocess
     
     def extract_video_id(url):
+        """Extract a YouTube video ID from a variety of URL formats."""
+
+        def is_valid(video_id):
+            return bool(video_id and re.fullmatch(r"[a-zA-Z0-9_-]{11}", video_id))
+
+        try:
+            parsed = urlparse(url)
+        except Exception:
+            parsed = None
+
+        if parsed and parsed.hostname:
+            hostname = parsed.hostname.lower()
+
+            if hostname.endswith("youtu.be"):
+                candidate = parsed.path.strip("/").split("/")[0]
+                if is_valid(candidate):
+                    return candidate
+
+            if hostname.endswith("youtube.com"):
+                query_params = parse_qs(parsed.query)
+                if "v" in query_params:
+                    candidate = query_params["v"][0]
+                    if is_valid(candidate):
+                        return candidate
+
+                path_parts = [part for part in parsed.path.split("/") if part]
+                if len(path_parts) >= 2 and path_parts[0] in {"embed", "v", "shorts", "live"}:
+                    candidate = path_parts[1]
+                    if is_valid(candidate):
+                        return candidate
+
+                for part in reversed(path_parts):
+                    if is_valid(part):
+                        return part
+
         pattern = r'(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:[^\/\n\s]+\/\S+\/|(?:v|e(?:mbed)?)\/|\S*?[?&]v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})'
         match = re.search(pattern, url)
         return match.group(1) if match else None
