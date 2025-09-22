@@ -75,6 +75,58 @@ RUN_INTEGRATION_TESTS = os.environ.get('RUN_INTEGRATION_TESTS', 'true').lower() 
 RUN_SLOW_TESTS = os.environ.get('RUN_SLOW_TESTS', 'false').lower() == 'true'
 
 
+class TestConfigurationLoading(unittest.TestCase):
+    """Verify environment-driven configuration is loaded correctly."""
+
+    def setUp(self):
+        self._original_env = {
+            key: os.environ.get(key)
+            for key in ("OFFLINE_MODE", "GITHUB_TOKEN")
+        }
+        self._orig_offline = onefilellm.OFFLINE_MODE
+        self._orig_token = onefilellm.TOKEN
+        self._orig_headers = dict(onefilellm.headers)
+        self._orig_warned = onefilellm._WARNED_ABOUT_TOKEN
+
+    def tearDown(self):
+        for key, value in self._original_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        onefilellm.OFFLINE_MODE = self._orig_offline
+        onefilellm.TOKEN = self._orig_token
+        onefilellm.headers = dict(self._orig_headers)
+        onefilellm._WARNED_ABOUT_TOKEN = self._orig_warned
+
+    def test_load_configuration_respects_env(self):
+        """Environment variables should update runtime configuration."""
+
+        with patch('onefilellm.load_dotenv') as mock_dotenv, \
+             patch.dict(os.environ, {'OFFLINE_MODE': 'TrUe', 'GITHUB_TOKEN': 'abc123'}, clear=False):
+            onefilellm.load_configuration()
+
+        mock_dotenv.assert_called_once()
+        self.assertTrue(onefilellm.OFFLINE_MODE)
+        self.assertEqual(onefilellm.TOKEN, 'abc123')
+        self.assertEqual(onefilellm.headers, {'Authorization': 'token abc123'})
+
+    def test_load_configuration_defaults_without_env(self):
+        """Missing environment variables should fall back to safe defaults."""
+
+        onefilellm._WARNED_ABOUT_TOKEN = False
+        with patch('onefilellm.load_dotenv') as mock_dotenv, \
+             patch('onefilellm.print') as mock_print, \
+             patch.dict(os.environ, {}, clear=True):
+            onefilellm.load_configuration()
+
+        mock_dotenv.assert_called_once()
+        mock_print.assert_called()
+        self.assertFalse(onefilellm.OFFLINE_MODE)
+        self.assertEqual(onefilellm.TOKEN, onefilellm.DEFAULT_GITHUB_TOKEN)
+        self.assertEqual(onefilellm.headers, {})
+
+
 class TestUtilityFunctions(unittest.TestCase):
     """Test utility functions from utils.py"""
     

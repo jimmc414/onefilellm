@@ -46,12 +46,51 @@ except ImportError:
 # --- Configuration Flags ---
 ENABLE_COMPRESSION_AND_NLTK = False # Set to True to enable NLTK download, stopword removal, and compressed output
 TOKEN_ESTIMATE_MULTIPLIER = 1.37 # Multiplier to estimate model token usage from tiktoken count
-# Global flag to disable network operations when set
-OFFLINE_MODE = os.getenv("OFFLINE_MODE", "").lower() in ("1", "true", "yes")
+# Default token placeholder used when GITHUB_TOKEN is absent
+DEFAULT_GITHUB_TOKEN = "default_token_here"
+
+# Flag to suppress repeating missing-token warnings
+_WARNED_ABOUT_TOKEN = False
+
+# Global flag to disable network operations when set; populated by load_configuration()
+OFFLINE_MODE = False
+# Placeholder for the GitHub token used for authenticated requests
+TOKEN = DEFAULT_GITHUB_TOKEN
+# Prepared headers for GitHub requests; populated by load_configuration()
+headers: Dict[str, str] = {}
+
+
+def load_configuration() -> None:
+    """Load environment-driven configuration values."""
+
+    global OFFLINE_MODE, TOKEN, headers, _WARNED_ABOUT_TOKEN
+
+    load_dotenv()
+
+    OFFLINE_MODE = os.getenv("OFFLINE_MODE", "").lower() in ("1", "true", "yes")
+
+    token_from_env = os.getenv("GITHUB_TOKEN")
+    if token_from_env is None:
+        TOKEN = DEFAULT_GITHUB_TOKEN
+        if not _WARNED_ABOUT_TOKEN:
+            print(
+                "[bold red]Warning:[/bold red] GITHUB_TOKEN environment variable not set. "
+                "GitHub API requests may fail or be rate-limited."
+            )
+            _WARNED_ABOUT_TOKEN = True
+    else:
+        TOKEN = token_from_env
+        _WARNED_ABOUT_TOKEN = False
+
+    headers = {"Authorization": f"token {TOKEN}"} if TOKEN != DEFAULT_GITHUB_TOKEN else {}
+
+
 # Path to cached tiktoken encoding for offline use
 LOCAL_TIKTOKEN_PATH = os.path.join(os.path.dirname(__file__), "cl100k_base.tiktoken")
 # Cached Encoding instance to avoid repeated downloads
 _TIKTOKEN_ENCODING = None
+
+load_configuration()
 # --- End Configuration Flags ---
 
 # --- Output Format Notes ---
@@ -314,15 +353,6 @@ def process_text_stream(raw_text_content: str, source_info: dict, console: Conso
     final_xml_for_stream = "\n".join(xml_parts)
     
     return final_xml_for_stream
-
-TOKEN = os.getenv('GITHUB_TOKEN', 'default_token_here')
-if TOKEN == 'default_token_here':
-    # Consider making this a non-fatal warning or prompt if interactive use is common
-    print("[bold red]Warning:[/bold red] GITHUB_TOKEN environment variable not set. GitHub API requests may fail or be rate-limited.")
-    # raise EnvironmentError("GITHUB_TOKEN environment variable not set.") # Keep commented out if you want it to proceed
-
-headers = {"Authorization": f"token {TOKEN}"} if TOKEN != 'default_token_here' else {}
-
 def process_ipynb_file(temp_file):
     try:
         import nbformat
@@ -526,7 +556,7 @@ def _download_and_read_file(url):
     print(f"  Downloading and reading content from: {url}")
     try:
         # Add headers conditionally
-        response = requests.get(url, headers=headers if TOKEN != 'default_token_here' else None, timeout=30)
+        response = requests.get(url, headers=headers if TOKEN != DEFAULT_GITHUB_TOKEN else None, timeout=30)
         response.raise_for_status()
         
         # Try to determine encoding
@@ -699,7 +729,7 @@ def excel_to_markdown_from_url(
     
     try:
         # Add headers conditionally
-        response = requests.get(url, headers=headers if TOKEN != 'default_token_here' else None, timeout=30)
+        response = requests.get(url, headers=headers if TOKEN != DEFAULT_GITHUB_TOKEN else None, timeout=30)
         response.raise_for_status()
         
         # Create a BytesIO buffer from the downloaded content
@@ -1959,7 +1989,7 @@ def process_github_pull_request(pull_request_url):
         msg = "Offline mode enabled; skipping GitHub pull request fetch"
         print(f"[bold yellow]{msg}[/bold yellow]")
         return f'<source type="github_pull_request" url="{escape_xml(pull_request_url)}"><error>{escape_xml(msg)}</error></source>'
-    if TOKEN == 'default_token_here':
+    if TOKEN == DEFAULT_GITHUB_TOKEN:
          print("[bold red]Error:[/bold red] GitHub Token not set. Cannot process GitHub Pull Request.")
          return f'<source type="github_pull_request" url="{escape_xml(pull_request_url)}"><error>GitHub Token not configured.</error></source>'
 
@@ -2086,7 +2116,7 @@ def process_github_issue(issue_url):
         msg = "Offline mode enabled; skipping GitHub issue fetch"
         print(f"[bold yellow]{msg}[/bold yellow]")
         return f'<source type="github_issue" url="{escape_xml(issue_url)}"><error>{escape_xml(msg)}</error></source>'
-    if TOKEN == 'default_token_here':
+    if TOKEN == DEFAULT_GITHUB_TOKEN:
          print("[bold red]Error:[/bold red] GitHub Token not set. Cannot process GitHub Issue.")
          return f'<source type="github_issue" url="{escape_xml(issue_url)}"><error>GitHub Token not configured.</error></source>'
 
@@ -2179,7 +2209,7 @@ def process_github_issues(issues_url):
         msg = "Offline mode enabled; skipping GitHub issues fetch"
         print(f"[bold yellow]{msg}[/bold yellow]")
         return f'<source type="github_issues" url="{escape_xml(issues_url)}"><error>{escape_xml(msg)}</error></source>'
-    if TOKEN == 'default_token_here':
+    if TOKEN == DEFAULT_GITHUB_TOKEN:
         print("[bold red]Error:[/bold red] GitHub Token not set. Cannot process GitHub Issues.")
         return f'<source type="github_issues" url="{escape_xml(issues_url)}"><error>GitHub Token not configured.</error></source>'
 
@@ -3754,10 +3784,10 @@ def run(args: Optional[List[str]] = None) -> None:
     ```
     """
 
+    # Ensure environment-driven settings reflect the latest .env configuration
+    load_configuration()
     asyncio.run(main(args))
 
 
 if __name__ == "__main__":
-    # Load environment variables from .env file
-    load_dotenv()
-    asyncio.run(main())
+    run()
