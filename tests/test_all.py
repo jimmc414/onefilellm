@@ -188,6 +188,8 @@ class TestUtilityFunctions(unittest.TestCase):
         self.assertTrue(is_allowed_filetype("script.py"))
         self.assertTrue(is_allowed_filetype("README.md"))
         self.assertTrue(is_allowed_filetype("config.yaml"))
+        self.assertTrue(is_allowed_filetype("config.yml"))
+        self.assertTrue(is_allowed_filetype("document.PDF"))
         self.assertFalse(is_allowed_filetype("image.png"))
         self.assertFalse(is_allowed_filetype("binary.exe"))
         self.assertFalse(is_allowed_filetype("archive.zip"))
@@ -458,12 +460,24 @@ class TestCoreProcessing(unittest.TestCase):
             test_file = os.path.join(self.temp_dir, f"file{i}.txt")
             with open(test_file, 'w') as f:
                 f.write(f"Content {i}")
-        
+
+        pdf_file = os.path.join(self.temp_dir, "document.pdf")
+        with open(pdf_file, 'wb') as f:
+            f.write(b'%PDF-1.4\n%Mock PDF content\n%%EOF')
+
+        yml_file = os.path.join(self.temp_dir, "config.yml")
+        with open(yml_file, 'w') as f:
+            f.write("setting: true\n")
+
         console = Console()
-        result = process_local_folder(self.temp_dir, console)
+        with patch('onefilellm._process_pdf_content_from_path', return_value='Mocked PDF text'):
+            result = process_local_folder(self.temp_dir, console)
         self.assertIn('<source type="local_folder"', result)
         for i in range(3):
             self.assertIn(f'Content {i}', result)
+        self.assertIn('Mocked PDF text', result)
+        self.assertIn('config.yml', result)
+        self.assertIn('setting: true', result)
     
     def test_excel_processing(self):
         """Test Excel file processing"""
@@ -1745,6 +1759,59 @@ class TestTemporaryFileCollisions(unittest.TestCase):
         self.assertEqual(len(set(download_paths)), 2)
         for path in download_paths:
             self.assertFalse(os.path.exists(path))
+
+
+class TestGitHubRepoFileTypes(unittest.TestCase):
+    """Ensure GitHub repository processing includes PDF and YAML files."""
+
+    def setUp(self):
+        self.orig_offline = onefilellm.OFFLINE_MODE
+        onefilellm.OFFLINE_MODE = False
+
+    def tearDown(self):
+        onefilellm.OFFLINE_MODE = self.orig_offline
+
+    def test_process_github_repo_includes_pdf_and_yml(self):
+        repo_url = 'https://github.com/user/repo'
+        contents_url = 'https://api.github.com/repos/user/repo/contents'
+
+        def mock_requests_get(url, headers=None, timeout=30):
+            self.assertEqual(url, contents_url)
+            response = MagicMock()
+            response.raise_for_status = MagicMock()
+            response.json.return_value = [
+                {
+                    "type": "file",
+                    "name": "report.pdf",
+                    "path": "report.pdf",
+                    "download_url": "https://example.com/report.pdf",
+                },
+                {
+                    "type": "file",
+                    "name": "config.yml",
+                    "path": "config.yml",
+                    "download_url": "https://example.com/config.yml",
+                },
+            ]
+            return response
+
+        def mock_download_file(url, target_path, headers=None):
+            with open(target_path, 'w', encoding='utf-8') as handle:
+                if url.endswith('report.pdf'):
+                    handle.write('PDF text from repo')
+                elif url.endswith('config.yml'):
+                    handle.write('enabled: true')
+                else:
+                    raise AssertionError(f'Unexpected download URL: {url}')
+
+        with patch('onefilellm.requests.get', side_effect=mock_requests_get), \
+             patch('onefilellm.download_file', side_effect=mock_download_file):
+            result = process_github_repo(repo_url)
+
+        self.assertIn('report.pdf', result)
+        self.assertIn('PDF text from repo', result)
+        self.assertIn('config.yml', result)
+        self.assertIn('enabled: true', result)
 
 
 class TestGitHubAuthorizationHeaders(unittest.TestCase):
