@@ -1,8 +1,7 @@
-import asyncio
-from onefilellm import main
+from onefilellm import run
 
 def entry_point():
-    asyncio.run(main())
+    run()
 
 if __name__ == "__main__":
     entry_point() 
