@@ -14,7 +14,7 @@ import re
 import requests
 from pathlib import Path
 from urllib.parse import urlparse
-from typing import Union, Optional
+from typing import Union, Optional, Dict
 import pyperclip
 from bs4 import BeautifulSoup
 
@@ -207,19 +207,40 @@ def parse_as_yaml(text_content: str) -> str:
 
 # ===== Network Utilities =====
 
-def download_file(url: str, target_path: str) -> None:
+def download_file(url: str, target_path: str, headers: Optional[Dict[str, str]] = None) -> None:
     """
     Download a file from a URL to a local path.
-    
+
     Args:
         url: URL to download from
         target_path: Local path to save the file
+        headers: Optional dictionary of headers to merge with defaults. When
+            provided (or when a GitHub token is discoverable from the
+            environment), an Authorization header will be included so that
+            authenticated downloads succeed.
     """
-    headers = {
+    default_headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     }
+
+    combined_headers = dict(default_headers)
+
+    if headers:
+        combined_headers.update({k: v for k, v in headers.items() if v is not None})
+
+    if not combined_headers.get('Authorization'):
+        token = os.getenv('GITHUB_TOKEN') or os.getenv('GH_TOKEN')
+        if token:
+            token = token.strip()
+            if token:
+                normalized = token
+                token_lower = token.lower()
+                if not (token_lower.startswith('token ') or token_lower.startswith('bearer ')):
+                    normalized = f'token {token}'
+                combined_headers['Authorization'] = normalized
+
     try:
-        with requests.get(url, headers=headers, timeout=30, stream=True) as response:
+        with requests.get(url, headers=combined_headers, timeout=30, stream=True) as response:
             response.raise_for_status()
             with open(target_path, 'wb') as f:
                 for chunk in response.iter_content(chunk_size=8192):

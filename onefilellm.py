@@ -416,7 +416,7 @@ def process_github_repo(repo_url):
                     with tempfile.TemporaryDirectory() as temp_dir:
                         temp_file = os.path.join(temp_dir, file_info["name"])
                         try:
-                            download_file(file_info["download_url"], temp_file)
+                            download_file(file_info["download_url"], temp_file, headers=headers)
                             repo_content_list.append(f'\n<file path="{escape_xml(file_info["path"])}">')
                             if file_info["name"].endswith(".ipynb"):
                                 # Append raw code - escape_xml not needed as it does nothing
