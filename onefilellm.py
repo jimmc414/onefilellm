@@ -1862,6 +1862,11 @@ async def process_web_crawl(base_url: str, cli_args: object, console: Console, p
     Returns:
         XML string with crawled content
     """
+    if OFFLINE_MODE:
+        msg = "Offline mode enabled; skipping web crawl"
+        console.print(f"[bold yellow]{msg}[/bold yellow]")
+        return f'<source type="web_crawl" base_url="{escape_xml(base_url)}"><error>{escape_xml(msg)}</error></source>'
+
     console.print(f"\n[bold green]Initiating web crawl for:[/bold green] [bright_yellow]{base_url}[/bright_yellow]")
     
     # Create and run the DocCrawler
