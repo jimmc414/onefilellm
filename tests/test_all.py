@@ -216,23 +216,49 @@ class TestUtilityFunctions(unittest.TestCase):
         target_path = os.path.join(self.temp_dir, "download.bin")
 
         # Successful download with streaming
-        with patch("utils.requests.get") as mock_get:
-            mock_response = MagicMock()
-            mock_response.iter_content.return_value = [b"foo", b"bar"]
-            mock_response.raise_for_status = MagicMock()
-            mock_get.return_value.__enter__.return_value = mock_response
+        with patch.dict(os.environ, {"GITHUB_TOKEN": ""}, clear=False):
+            with patch("utils.requests.get") as mock_get:
+                mock_response = MagicMock()
+                mock_response.iter_content.return_value = [b"foo", b"bar"]
+                mock_response.raise_for_status = MagicMock()
+                mock_get.return_value.__enter__.return_value = mock_response
 
-            download_file(url, target_path)
+                download_file(url, target_path)
 
-            with open(target_path, "rb") as f:
-                self.assertEqual(f.read(), b"foobar")
+                with open(target_path, "rb") as f:
+                    self.assertEqual(f.read(), b"foobar")
 
-            mock_get.assert_called_once_with(
-                url,
-                headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'},
-                timeout=30,
-                stream=True,
-            )
+                called_args, called_kwargs = mock_get.call_args
+                self.assertEqual(called_args, (url,))
+                self.assertEqual(called_kwargs["timeout"], 30)
+                self.assertTrue(called_kwargs["stream"])
+                self.assertEqual(
+                    called_kwargs["headers"].get('User-Agent'),
+                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                )
+                self.assertNotIn('Authorization', called_kwargs["headers"])
+
+        # Explicit headers should merge with defaults and forward Authorization
+        with patch.dict(os.environ, {"GITHUB_TOKEN": ""}, clear=False):
+            with patch("utils.requests.get") as mock_get:
+                mock_response = MagicMock()
+                mock_response.iter_content.return_value = [b"baz"]
+                mock_response.raise_for_status = MagicMock()
+                mock_get.return_value.__enter__.return_value = mock_response
+
+                custom_headers = {'Authorization': 'token abc123', 'X-Test': '1'}
+                target_path_with_headers = os.path.join(self.temp_dir, "download_with_headers.bin")
+
+                download_file(url, target_path_with_headers, headers=custom_headers)
+
+                called_args, called_kwargs = mock_get.call_args
+                self.assertEqual(called_args, (url,))
+                self.assertEqual(called_kwargs["headers"].get('User-Agent'),
+                                 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+                self.assertEqual(called_kwargs["headers"]["Authorization"], 'token abc123')
+                self.assertEqual(called_kwargs["headers"]["X-Test"], '1')
+                # Ensure caller's headers dictionary is not mutated
+                self.assertEqual(custom_headers, {'Authorization': 'token abc123', 'X-Test': '1'})
 
         # Error handling: ensure no exception and file not created
         error_path = os.path.join(self.temp_dir, "error.bin")
@@ -1701,7 +1727,7 @@ class TestTemporaryFileCollisions(unittest.TestCase):
 
         download_paths = []
 
-        def mock_download_file(url, target_path):
+        def mock_download_file(url, target_path, headers=None):
             download_paths.append(target_path)
             with open(target_path, 'wb') as f:
                 if url == 'url1':
@@ -1719,6 +1745,62 @@ class TestTemporaryFileCollisions(unittest.TestCase):
         self.assertEqual(len(set(download_paths)), 2)
         for path in download_paths:
             self.assertFalse(os.path.exists(path))
+
+
+class TestGitHubAuthorizationHeaders(unittest.TestCase):
+    """Validate GitHub Authorization headers propagate through downloads."""
+
+    def setUp(self):
+        self.orig_offline = onefilellm.OFFLINE_MODE
+        self.orig_headers = dict(onefilellm.headers)
+        self.orig_token = onefilellm.TOKEN
+        onefilellm.OFFLINE_MODE = False
+        onefilellm.headers = {'Authorization': 'token testtoken'}
+        onefilellm.TOKEN = 'testtoken'
+
+    def tearDown(self):
+        onefilellm.OFFLINE_MODE = self.orig_offline
+        onefilellm.headers = dict(self.orig_headers)
+        onefilellm.TOKEN = self.orig_token
+
+    def test_process_github_repo_forwards_authorization(self):
+        repo_url = 'https://github.com/user/private'
+        requested_headers = []
+        forwarded_headers = []
+
+        def mock_requests_get(url, headers=None, timeout=30):
+            requested_headers.append(headers)
+            response = MagicMock()
+            response.raise_for_status = MagicMock()
+            response.json.return_value = [
+                {
+                    "type": "file",
+                    "name": "example.txt",
+                    "path": "example.txt",
+                    "download_url": "https://example.com/example.txt",
+                }
+            ]
+            return response
+
+        def mock_download_file(url, target_path, headers=None):
+            forwarded_headers.append(headers)
+            with open(target_path, 'w', encoding='utf-8') as handle:
+                handle.write('dummy content')
+
+        with patch('onefilellm.requests.get', side_effect=mock_requests_get), \
+             patch('onefilellm.download_file', side_effect=mock_download_file):
+            result = process_github_repo(repo_url)
+
+        self.assertIn('dummy content', result)
+        self.assertTrue(requested_headers, 'Expected directory listing requests')
+        self.assertTrue(forwarded_headers, 'Expected file downloads to occur')
+
+        for header in requested_headers:
+            self.assertIsNotNone(header)
+            self.assertEqual(header.get('Authorization'), 'token testtoken')
+
+        self.assertEqual(forwarded_headers[0].get('Authorization'), 'token testtoken')
+
 
 class TestPerformance(unittest.TestCase):
     """Performance and edge case tests"""
