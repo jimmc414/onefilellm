@@ -22,10 +22,10 @@ from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 
-import onefilellm
-
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import onefilellm
 
 # Import the modules we're testing
 from onefilellm import (
