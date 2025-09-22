@@ -1756,6 +1756,40 @@ class TestOfflineMode(unittest.TestCase):
         self.assertIn('Offline mode enabled', result)
         mock_get.assert_not_called()
 
+    def test_process_web_crawl_offline(self):
+        import asyncio
+
+        console = Console(file=io.StringIO())
+        args = type('Args', (), {})()
+
+        with patch('onefilellm.DocCrawler') as mock_crawler:
+            result = asyncio.run(
+                onefilellm.process_web_crawl('https://example.com', args, console, progress_bar=None)
+            )
+
+        self.assertIn('<source type="web_crawl"', result)
+        self.assertIn('Offline mode enabled', result)
+        mock_crawler.assert_not_called()
+        self.assertIn('Offline mode enabled; skipping web crawl', console.file.getvalue())
+
+    def test_process_github_pull_request_offline(self):
+        with patch('requests.get') as mock_get:
+            result = process_github_pull_request('https://github.com/user/repo/pull/1')
+        self.assertIn('Offline mode enabled', result)
+        mock_get.assert_not_called()
+
+    def test_process_github_issue_offline(self):
+        with patch('requests.get') as mock_get:
+            result = process_github_issue('https://github.com/user/repo/issues/1')
+        self.assertIn('Offline mode enabled', result)
+        mock_get.assert_not_called()
+
+    def test_process_github_issues_offline(self):
+        with patch('requests.get') as mock_get:
+            result = process_github_issues('https://github.com/user/repo/issues')
+        self.assertIn('Offline mode enabled', result)
+        mock_get.assert_not_called()
+
 
 class TestTemporaryFileCollisions(unittest.TestCase):
     """Ensure temporary file handling avoids name collisions."""
