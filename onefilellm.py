@@ -2346,7 +2346,13 @@ async def process_input(input_path, args, console, progress=None, task=None):
     
     try:
         console.print(f"\n[bold bright_green]Processing:[/bold bright_green] [bold bright_yellow]{input_path}[/bold bright_yellow]\n")
-        
+
+        # Normalize potential DOI/PMID identifiers that may include prefixes like "doi:" or "pmid:"
+        cleaned_identifier = input_path.strip()
+        prefix_match = re.match(r"^(doi|pmid)\s*:\s*(.+)$", cleaned_identifier, flags=re.IGNORECASE)
+        if prefix_match:
+            cleaned_identifier = prefix_match.group(2).strip()
+
         # Input type detection logic
         if "github.com" in input_path:
             parsed_url = urlparse(input_path)
@@ -2415,8 +2421,8 @@ async def process_input(input_path, args, console, progress=None, task=None):
                     # Note: The new crawler doesn't return processed_urls separately,
                     # they're included in the XML output if needed
         # Basic check for DOI (starts with 10.) or PMID (all digits)
-        elif (input_path.startswith("10.") and "/" in input_path) or input_path.isdigit():
-            result = process_doi_or_pmid(input_path)
+        elif (cleaned_identifier.startswith("10.") and "/" in cleaned_identifier) or cleaned_identifier.isdigit():
+            result = process_doi_or_pmid(cleaned_identifier)
         elif os.path.isdir(input_path): # Check if it's a local directory
             result = process_local_folder(input_path, console)
         elif os.path.isfile(input_path): # Handle single local file
