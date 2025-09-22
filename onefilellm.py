@@ -308,6 +308,13 @@ def process_text_stream(raw_text_content: str, source_info: dict, console: Conso
         actual_format = detect_text_format(raw_text_content)
         console.print(f"[green]Detected format: [bold]{actual_format}[/bold][/green]")
 
+    if actual_format == "yaml" and yaml is None:
+        console.print(
+            "[bold yellow]Warning:[/bold yellow] PyYAML is not installed; "
+            "falling back to plain text parsing for YAML input."
+        )
+        actual_format = "text"
+
     parser_function = get_parser_for_format(actual_format)
 
     try:
@@ -315,10 +322,13 @@ def process_text_stream(raw_text_content: str, source_info: dict, console: Conso
     except json.JSONDecodeError as e:
         console.print(f"[bold red]Error:[/bold red] Input specified or detected as JSON, but it's not valid JSON. Details: {e}")
         return None
-    except yaml.YAMLError as e: # Assuming PyYAML is used
-        console.print(f"[bold red]Error:[/bold red] Input specified or detected as YAML, but it's not valid YAML. Details: {e}")
-        return None
     except Exception as e: # Catch-all for other parsing errors
+        if yaml is not None and isinstance(e, yaml.YAMLError):
+            console.print(
+                "[bold red]Error:[/bold red] Input specified or detected as YAML, "
+                f"but it's not valid YAML. Details: {e}"
+            )
+            return None
         console.print(f"[bold red]Error:[/bold red] Failed to parse content as {actual_format}. Details: {e}")
         return None
 

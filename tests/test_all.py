@@ -359,15 +359,39 @@ class TestStreamProcessing(unittest.TestCase):
     def test_format_override(self):
         """Test format override functionality"""
         json_content = '{"key": "value"}'
-        
+
         # Without override - should detect as JSON
         result = process_text_stream(json_content, {'type': 'stdin'}, self.console)
         self.assertIn('processed_as_format="json"', result)
-        
+
         # With override to text
         result = process_text_stream(json_content, {'type': 'stdin'}, self.console, format_override="text")
         self.assertIn('processed_as_format="text"', result)
-    
+
+    @unittest.skipUnless(onefilellm.yaml is not None, "PyYAML not installed")
+    def test_invalid_yaml_reports_error(self):
+        """Invalid YAML should surface a helpful error when PyYAML is available."""
+        invalid_yaml = "key: [unbalanced"
+
+        result = process_text_stream(invalid_yaml, {'type': 'stdin'}, self.console, format_override="yaml")
+
+        self.assertIsNone(result)
+        messages = [str(call.args[0]) for call in self.console.print.call_args_list]
+        self.assertTrue(any("not valid YAML" in message for message in messages))
+
+    def test_yaml_override_without_pyyaml_falls_back(self):
+        """When PyYAML is unavailable, YAML override should gracefully fall back to text."""
+        yaml_content = "key: value\nlist:\n  - item1"
+
+        console = MagicMock()
+        with patch('onefilellm.yaml', None), patch('utils.yaml', None):
+            result = process_text_stream(yaml_content, {'type': 'stdin'}, console, format_override="yaml")
+
+        self.assertIsNotNone(result)
+        self.assertIn('processed_as_format="text"', result)
+        messages = [str(call.args[0]) for call in console.print.call_args_list]
+        self.assertTrue(any("falling back to plain text" in message for message in messages))
+
     def test_clipboard_errors(self):
         """Test clipboard error handling"""
         # We're testing the actual function behavior, not mocking
