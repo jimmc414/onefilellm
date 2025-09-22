@@ -452,6 +452,33 @@ class TestProcessInputFileURLs(unittest.TestCase):
             mock_crawl.assert_awaited_once()
 
 
+class TestProcessInputDoiPmid(unittest.TestCase):
+    """Test DOI and PMID handling and normalization in process_input."""
+
+    def setUp(self):
+        self.console = Console(file=io.StringIO())
+        self.args = type('Args', (), {})()
+
+    def test_process_input_normalizes_identifier_prefixes(self):
+        """Inputs with or without DOI/PMID prefixes should resolve to the same identifier."""
+        import asyncio
+
+        cases = [
+            ("10.1000/xyz123", "10.1000/xyz123"),
+            ("DOI:10.1000/xyz123", "10.1000/xyz123"),
+            ("doi: 10.1000/xyz123", "10.1000/xyz123"),
+            ("12345678", "12345678"),
+            ("PMID:12345678", "12345678"),
+        ]
+
+        for raw_input, expected_identifier in cases:
+            with self.subTest(raw_input=raw_input):
+                with patch('onefilellm.process_doi_or_pmid', return_value=f'result-{expected_identifier}') as mock_process:
+                    result = asyncio.run(process_input(raw_input, self.args, self.console))
+                    self.assertEqual(result, f'result-{expected_identifier}')
+                    mock_process.assert_called_once_with(expected_identifier)
+
+
 class TestCoreProcessing(unittest.TestCase):
     """Test core processing functions"""
     
