@@ -190,6 +190,7 @@ class TestUtilityFunctions(unittest.TestCase):
         self.assertTrue(is_allowed_filetype("config.yaml"))
         self.assertTrue(is_allowed_filetype("config.yml"))
         self.assertTrue(is_allowed_filetype("document.PDF"))
+        self.assertTrue(is_allowed_filetype("styles.css"))
         self.assertFalse(is_allowed_filetype("image.png"))
         self.assertFalse(is_allowed_filetype("binary.exe"))
         self.assertFalse(is_allowed_filetype("archive.zip"))

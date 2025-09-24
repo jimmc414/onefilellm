@@ -316,7 +316,7 @@ def is_allowed_filetype(filename: str) -> bool:
     allowed_extensions = [
         '.py', '.txt', '.js', '.rst', '.sh', '.md', '.pyx', '.html', '.yaml', '.yml', '.pdf',
         '.json', '.jsonl', '.ipynb', '.h', '.c', '.sql', '.csv', '.go', '.java',
-        '.cpp', '.hpp', '.cs', '.php', '.rb', '.swift', '.kt', '.ts', '.tsx',
+        '.cpp', '.hpp', '.cs', '.php', '.rb', '.swift', '.kt', '.ts', '.tsx', '.css',
         '.jsx', '.vue', '.r', '.m', '.scala', '.rs', '.dart', '.lua', '.pl',
         '.jl', '.mat', '.asm', '.s', '.pas', '.fs', '.ml', '.ex', '.clj',
         '.hs', '.lsp', '.scm', '.nim', '.zig', '.d', '.ada', '.f90', '.cob',
