@@ -421,7 +421,7 @@ def process_github_repo(repo_url):
                 if file_info["type"] == "dir" and file_info["name"] in EXCLUDED_DIRS:
                     continue
 
-                if file_info["type"] == "file" and is_allowed_filetype(file_info["name"]):
+                if file_info["type"] == "file" and is_allowed_filetype(file_info["name"]) and not is_excluded_file(file_info["name"]):
                     print(f"Processing {file_info['path']}...")
                     with tempfile.TemporaryDirectory() as temp_dir:
                         temp_file = os.path.join(temp_dir, file_info["name"])
@@ -475,7 +475,7 @@ def process_local_folder(local_path, console: Console):
                     if item not in EXCLUDED_DIRS:
                         process_local_directory_recursive(item_path, content_list, console)
                 elif os.path.isfile(item_path):
-                    if is_allowed_filetype(item):
+                    if is_allowed_filetype(item) and not is_excluded_file(item):
                         console.print(f"Processing {item_path}...")
                         content_list.append(f'\n<file path="{escape_xml(relative_path)}">')
                         try:
