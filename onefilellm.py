@@ -3422,7 +3422,7 @@ REAL-WORLD USE CASES:
                                default=True, help='Skip PDF files')
     crawler_group.add_argument('--crawl-no-ignore-epubs', action='store_false', dest='crawl_ignore_epubs',
                                default=True, help='Include EPUB files')
-    crawler_group.add_argument('--crawl-ignore-ssl', action='store_true',
+    crawler_group.add_argument('--crawl-ignore-ssl', action='store_true', default=False,
                                help='Ignore SSL certificate errors')
     
     # Help options
