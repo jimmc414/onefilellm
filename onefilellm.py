@@ -3423,7 +3423,7 @@ REAL-WORLD USE CASES:
     crawler_group.add_argument('--crawl-no-ignore-epubs', action='store_false', dest='crawl_ignore_epubs',
                                default=True, help='Include EPUB files')
     crawler_group.add_argument('--crawl-ignore-ssl', action='store_true', default=False,
-                               help='Ignore SSL certificate errors')
+                               help='Ignore SSL certificate errors (Warning: This disables security verification)')
     
     # Help options
     parser.add_argument('--help-topic', nargs='?', const='', metavar='TOPIC',
