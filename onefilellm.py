@@ -1410,6 +1410,7 @@ class DocCrawler:
         self.restrict_path = getattr(self.config, 'crawl_restrict_path', False)
         self.include_pdfs = getattr(self.config, 'crawl_include_pdfs', True)
         self.ignore_epubs = getattr(self.config, 'crawl_ignore_epubs', True)
+        self.ignore_ssl = getattr(self.config, 'crawl_ignore_ssl', False)
 
     async def _init_session(self):
         import aiohttp
@@ -1419,7 +1420,12 @@ class DocCrawler:
             "Accept-Language": "en-US,en;q=0.5",
             "Connection": "keep-alive",
         }
-        self.session = aiohttp.ClientSession(headers=headers)
+        connector = None
+        if self.ignore_ssl:
+            connector = aiohttp.TCPConnector(ssl=False)
+            self.console.print("[bold yellow]Warning: SSL verification disabled for web crawler.[/bold yellow]")
+        
+        self.session = aiohttp.ClientSession(headers=headers, connector=connector)
 
     async def _close_session(self):
         if self.session:
@@ -3416,6 +3422,8 @@ REAL-WORLD USE CASES:
                                default=True, help='Skip PDF files')
     crawler_group.add_argument('--crawl-no-ignore-epubs', action='store_false', dest='crawl_ignore_epubs',
                                default=True, help='Include EPUB files')
+    crawler_group.add_argument('--crawl-ignore-ssl', action='store_true',
+                               help='Ignore SSL certificate errors')
     
     # Help options
     parser.add_argument('--help-topic', nargs='?', const='', metavar='TOPIC',
