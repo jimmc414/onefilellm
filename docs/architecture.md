@@ -152,6 +152,7 @@ onefilellm.py
   |-- nltk
   |-- nbformat
   |-- nbconvert
+  |-- yt-dlp
   |-- youtube-transcript-api
   |-- pyperclip
   |-- wget
@@ -396,8 +397,10 @@ main
 |
 +--- fetch_youtube_transcript(url)
 |    |
-|    +--- YouTubeTranscriptApi.get_transcript(video_id)
-|    +--- TextFormatter().format_transcript(transcript_list)
+|    +--- subprocess.run(yt-dlp --write-auto-subs --write-subs ...)
+|    +--- find_subtitle_file(temp_dir, video_id)
+|    +--- parse_subtitle_text(subtitle_file)
+|    +--- YouTubeTranscriptApi().fetch(video_id)   [fallback if yt-dlp fails]
 |
 +--- crawl_and_extract_text(base_url, output_file, urls_list_file, max_depth, include_pdfs, ignore_epubs)
 |    |

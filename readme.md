@@ -366,11 +366,17 @@ python onefilellm.py --help-topic config     # Environment and configuration
 
 ## Troubleshooting
 
-- **YouTube transcript errors**: Fetching YouTube transcripts requires the
-  [`yt-dlp`](https://github.com/yt-dlp/yt-dlp) tool. If you see errors about
-  `yt-dlp` not being found or failing, install it with:
+- **YouTube transcript errors**: Transcripts are fetched with the
+  [`yt-dlp`](https://github.com/yt-dlp/yt-dlp) tool first, falling back to the
+  [`youtube-transcript-api`](https://github.com/jdepoix/youtube-transcript-api)
+  library. YouTube changes regularly break older releases of both, so if
+  transcript fetching stops working, upgrade them first:
 
   ```bash
-  pip install yt-dlp
+  pip install -U yt-dlp "youtube-transcript-api>=1.1,<2"
   ```
+
+  Installing [Node.js](https://nodejs.org/) is also recommended: yt-dlp uses
+  it to solve YouTube's JavaScript challenges, which makes subtitle
+  extraction much more reliable.
 
