@@ -876,7 +876,52 @@ def fetch_youtube_transcript(url):
     """
     import tempfile
     import subprocess
-    
+    import glob
+
+    def find_subtitle_file(directory, vid):
+        """Locate a subtitle file in directory, preferring English variants.
+
+        yt-dlp's language codes drift (en, en-orig, en-US, en-GB, ...), so we
+        glob rather than hardcode {id}.en.vtt. Prefer .srt (normalized by
+        --convert-subs) over .vtt, and English over any other language.
+        """
+        patterns = [
+            f"{vid}.en.srt", f"{vid}.en-orig.srt", f"{vid}.en*.srt", f"{vid}*.srt",
+            f"{vid}.en.vtt", f"{vid}.en-orig.vtt", f"{vid}.en*.vtt", f"{vid}*.vtt",
+            "*.srt", "*.vtt",
+        ]
+        for pattern in patterns:
+            matches = sorted(glob.glob(os.path.join(directory, pattern)))
+            if matches:
+                return matches[0]
+        return None
+
+    def parse_subtitle_text(file_path):
+        """Extract plain text from a VTT/SRT file, dropping consecutive dupes.
+
+        YouTube's rolling auto-captions repeat each line as the caption scrolls,
+        which previously produced ~3x duplicated output. We skip timestamps,
+        cue indices, and the WEBVTT/Kind:/Language: header lines, strip inline
+        tags, and collapse consecutive duplicate lines.
+        """
+        with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+            content = f.read()
+
+        transcript_lines = []
+        for line in content.split('\n'):
+            stripped = line.strip()
+            if (not stripped or '-->' in line or stripped.isdigit()
+                    or stripped.startswith('WEBVTT')
+                    or stripped.startswith('Kind:')
+                    or stripped.startswith('Language:')):
+                continue
+            # Remove inline HTML/VTT tags (e.g. <c>, <00:00:01.000>)
+            clean_line = re.sub(r'<[^>]+>', '', stripped).strip()
+            # Drop consecutive duplicate lines from rolling auto-captions
+            if clean_line and (not transcript_lines or transcript_lines[-1] != clean_line):
+                transcript_lines.append(clean_line)
+        return transcript_lines
+
     def extract_video_id(url):
         """Extract a YouTube video ID from a variety of URL formats."""
 
@@ -937,23 +982,51 @@ def fetch_youtube_transcript(url):
         with tempfile.TemporaryDirectory() as temp_dir:
             output_template = os.path.join(temp_dir, '%(id)s.%(ext)s')
             
-            # yt-dlp command to download subtitles only
+            # yt-dlp command to download subtitles only.
+            # --js-runtimes node uses the full extraction path (node is present)
+            # instead of the degraded android_vr fallback that intermittently
+            # yields zero subtitle formats. --convert-subs srt normalizes the
+            # overlapping rolling auto-caption VTT into clean SRT. We request the
+            # explicit short language list "en,en-orig" -- a broad pattern like
+            # "en.*" can expand to translation codes (en-de, ...) and trigger 429.
             cmd = [
                 'yt-dlp',
-                '--write-auto-sub',  # Get automatic subtitles if available
-                '--write-sub',       # Get manual subtitles if available
-                '--sub-lang', 'en',  # Prefer English, but will get others if not available
-                '--skip-download',   # Don't download the video
-                '--quiet',           # Reduce output
+                '--write-auto-subs',     # Get automatic subtitles if available
+                '--write-subs',          # Get manual subtitles if available
+                '--sub-langs', 'en,en-orig',  # Prefer English + auto-orig variant
+                '--convert-subs', 'srt', # Normalize to SRT (de-overlaps captions)
+                '--skip-download',       # Don't download the video
+                '--js-runtimes', 'node', # Use full extraction path (node present)
+                '--quiet',               # Reduce output
                 '--no-warnings',
                 '-o', output_template,
                 url
             ]
-            
+
             # Run yt-dlp
             result = subprocess.run(cmd, capture_output=True, text=True)
 
-            if result.returncode != 0:
+            # Older yt-dlp releases predate --js-runtimes and abort on it with
+            # "no such option"; retry once without the flag so they still work.
+            if result.returncode != 0 and 'no such option' in (result.stderr or ''):
+                js_idx = cmd.index('--js-runtimes')
+                cmd = cmd[:js_idx] + cmd[js_idx + 2:]
+                result = subprocess.run(cmd, capture_output=True, text=True)
+
+            # Discover a subtitle file regardless of exit code: a 429 on one
+            # secondary language (e.g. en-de) returns nonzero even though the
+            # primary en file was written, so we always scan the temp dir first.
+            subtitle_file = find_subtitle_file(temp_dir, video_id)
+
+            if subtitle_file:
+                transcript_lines = parse_subtitle_text(subtitle_file)
+                if transcript_lines:
+                    transcript_text = ' '.join(transcript_lines)
+                    print(f"Transcript fetched successfully using yt-dlp. Got {len(transcript_lines)} lines.")
+                else:
+                    # A written-but-empty file (e.g. PO-token/empty timedtext)
+                    error_msg = "No subtitle text found in downloaded file"
+            elif result.returncode != 0:
                 # Capture stderr for more informative error messages
                 stderr = result.stderr.strip() if result.stderr else ""
                 error_msg = (
@@ -962,35 +1035,8 @@ def fetch_youtube_transcript(url):
                     else f"yt-dlp failed with exit code {result.returncode}"
                 )
             else:
-                # Look for subtitle files
-                subtitle_files = []
-                for ext in ['.en.vtt', '.en.srt', '.vtt', '.srt']:
-                    subtitle_path = os.path.join(temp_dir, f"{video_id}{ext}")
-                    if os.path.exists(subtitle_path):
-                        subtitle_files.append(subtitle_path)
+                error_msg = "No subtitle files found"
 
-                if subtitle_files:
-                    # Read the first available subtitle file
-                    with open(subtitle_files[0], 'r', encoding='utf-8') as f:
-                        content = f.read()
-
-                    # Parse VTT or SRT format to extract just the text
-                    lines = content.split('\n')
-                    transcript_lines = []
-
-                    for line in lines:
-                        # Skip timestamp lines and empty lines
-                        if '-->' not in line and line.strip() and not line.strip().isdigit() and not line.startswith('WEBVTT'):
-                            # Remove HTML tags if present
-                            clean_line = re.sub(r'<[^>]+>', '', line)
-                            if clean_line.strip():
-                                transcript_lines.append(clean_line.strip())
-
-                    transcript_text = ' '.join(transcript_lines)
-                    print(f"Transcript fetched successfully using yt-dlp. Got {len(transcript_lines)} lines.")
-                else:
-                    error_msg = "No subtitle files found"
-                
     except FileNotFoundError:
         error_msg = "yt-dlp not found. Please install it with: pip install yt-dlp"
     except Exception as e:
@@ -1002,21 +1048,55 @@ def fetch_youtube_transcript(url):
         try:
             print("Falling back to youtube_transcript_api...")
             from youtube_transcript_api import YouTubeTranscriptApi
-            transcript_list = YouTubeTranscriptApi.get_transcript(video_id)
-            
+
+            transcript_list = None
+            # youtube_transcript_api >= 1.0 uses an instance API (.fetch / .list);
+            # the static get_transcript() was deprecated in 1.0 and removed in
+            # 1.2. Prefer the instance API, falling back to the legacy static
+            # method only if the new surface is absent (library < 1.0).
+            api = None
+            try:
+                api = YouTubeTranscriptApi()
+            except (AttributeError, TypeError):
+                api = None
+
+            if api is not None and hasattr(api, 'fetch'):
+                try:
+                    fetched = api.fetch(video_id, languages=['en', 'en-orig'])
+                    transcript_list = fetched.to_raw_data()
+                except Exception:
+                    # English unavailable: take any transcript that .list() offers
+                    if hasattr(api, 'list'):
+                        available = api.list(video_id)
+                        first = next(iter(available), None)
+                        if first is not None:
+                            transcript_list = first.fetch().to_raw_data()
+                    if transcript_list is None:
+                        raise
+            else:
+                # Legacy static API (youtube_transcript_api < 1.0)
+                transcript_list = YouTubeTranscriptApi.get_transcript(video_id)
+
             if isinstance(transcript_list, list) and transcript_list:
-                # Format transcript entries
+                # Format transcript entries (each is {'text','start','duration'})
                 transcript_lines = []
                 for entry in transcript_list:
                     if 'text' in entry:
                         transcript_lines.append(entry['text'])
-                
+
                 transcript_text = ' '.join(transcript_lines)
+                # Fallback succeeded: clear any yt-dlp error so it doesn't mask success
+                error_msg = None
                 print(f"Transcript fetched successfully using youtube_transcript_api. Got {len(transcript_list)} entries.")
         except Exception as e:
-            if not error_msg:
-                error_msg = f"youtube_transcript_api also failed: {str(e)}"
-    
+            # Reflect both failures: don't let the yt-dlp error silently drop
+            # the fallback's real exception.
+            fallback_msg = f"youtube_transcript_api fallback also failed: {str(e)}"
+            if error_msg:
+                error_msg = f"{error_msg}; {fallback_msg}"
+            else:
+                error_msg = fallback_msg
+
     # Format the successful transcript or return error
     if transcript_text:
         # Use XML structure for success
