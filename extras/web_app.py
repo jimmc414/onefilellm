@@ -250,17 +250,32 @@ def _security_check(input_path):
 # Shared algorithms (contract §7.1 classify, §7.2 metrics, §7.3 nodes).
 # ---------------------------------------------------------------------------
 def classify(source_text):
-    """Classify the bare <source> string (contract §7.1). Do NOT naively regex <error>."""
+    """Classify the bare <source> string (contract §7.1). Do NOT naively regex <error>.
+
+    A hard failure is an <error> that is a DIRECT child of <source> with no
+    content alongside it (e.g. ``<source ...><error>msg</error></source>``). A
+    crawl/repo that produced <page>/<file> children is a SUCCESS even if an
+    individual page/file errored.
+
+    We detect this by the PRESENCE of <page>/<file> tags rather than by stripping
+    their bodies and re-scanning: file CONTENT routinely contains tag-like text
+    (e.g. onefilellm's own source builds ``</file>`` and ``<error ...>`` strings),
+    which fools a strip+search and would mislabel a successful fetch as an error.
+    """
     # 1) Empty backstop — get_token_count strips ALL tags, so ~0 means no real content.
     if get_token_count(source_text) < 5:
         return ("empty", None)
-    # 2) Strip page/file subtrees, THEN look for a source-level <error>.
-    stripped = re.sub(r'<page\b[^>]*>.*?</page>', '', source_text, flags=re.DOTALL | re.IGNORECASE)
-    stripped = re.sub(r'<file\b[^>]*>.*?</file>', '', stripped, flags=re.DOTALL | re.IGNORECASE)
-    m = re.search(r'<error\b[^>]*>(.*?)</error>', stripped, flags=re.DOTALL | re.IGNORECASE)
+    # 2) Produced structured children → the fetch succeeded; any <error> inside is
+    #    per-page/per-file (or just tag-like text in file content), not a hard fail.
+    if re.search(r'<(?:file|page)\b', source_text, flags=re.IGNORECASE):
+        return ("success", None)
+    # 3) No children: a root-level <error> means the fetch hard-failed. (The source
+    #    here is simple — `<source ...><error>msg</error></source>` — and processor
+    #    error messages are XML-escaped, so this regex is safe on this shape.)
+    m = re.search(r'<error\b[^>]*>(.*?)</error>', source_text, flags=re.DOTALL | re.IGNORECASE)
     if m:
-        return ("processing", m.group(1).strip())  # message = source-level error text
-    # 3) Otherwise success (a crawl with one timed-out <page> still counts as success).
+        return ("processing", m.group(1).strip())
+    # 4) Otherwise success.
     return ("success", None)
 
 

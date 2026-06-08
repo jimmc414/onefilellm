@@ -272,6 +272,26 @@ def test_classify_partial_crawl_is_success(web_app_module):
     assert msg is None
 
 
+def test_classify_tag_like_file_content_is_success(web_app_module):
+    """A repo whose FILE CONTENT contains literal </file> and <error...> strings
+    (e.g. onefilellm's own source, which builds those tags) must classify as
+    success — not as a processing error. Regression for the strip+search bug that
+    surfaced a regex fragment ("]*>(.*?)") as the error message."""
+    src = (
+        '<source type="github_repository" url="https://github.com/jimmc414/onefilellm">\n'
+        '<file path="onefilellm.py">\n'
+        'def wrap(p, data):\n'
+        '    return f"<file path=\\"{p}\\">{data}</file>"   # literal </file> here\n'
+        '    m = re.search(r"<error\\b[^>]*>(.*?)</error>", text)  # literal <error...> here\n'
+        'plus plenty of additional real source words so the token count clears the backstop\n'
+        '</file>\n'
+        '</source>'
+    )
+    status, msg = web_app_module.classify(src)
+    assert status == "success", f"misclassified tag-like file content as {status!r} ({msg!r})"
+    assert msg is None
+
+
 # ===========================================================================
 # GET /stream  — SSE progress
 # ===========================================================================

@@ -894,7 +894,7 @@ kbd {
   border-radius: var(--radius-md);
   background: var(--surface);
 }
-.error__icon { font-size: 1.25rem; flex: none; margin-top: 2px; }
+.error__icon { width: 1em; height: 1em; font-size: 1.5rem; flex: none; margin-top: 2px; }
 .error__body { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
 .error__heading { font-size: 1.125rem; font-weight: 600; letter-spacing: -0.005em; }
 .error__message {
