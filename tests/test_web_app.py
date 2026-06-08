@@ -18,6 +18,7 @@ Run from the repo root:
 
 import os
 import sys
+import socket
 import importlib
 
 import pytest
@@ -406,6 +407,124 @@ def test_download_whitelisted_but_missing_404(client, web_app_module):
     assert not os.path.isfile(path)
     resp = client.get("/download", query_string={"filename": COMPRESSED})
     assert resp.status_code == 404
+
+
+# ===========================================================================
+# SSRF guard — _is_safe_url hardening (GH issue #79 + adversarial red-team)
+# ===========================================================================
+# Every must-block URL below is a confirmed SSRF vector (a urlparse/urllib3/
+# percent-encoding parser differential, or a public name that resolves to a
+# private IP); every must-allow URL is a legitimate public source that must NOT
+# be over-blocked (incl. internationalised domains). DNS is monkeypatched so the
+# tests never touch the network and don't depend on third-party wildcard-DNS
+# domains (nip.io / localtest.me) staying alive.
+
+
+def _patch_getaddrinfo(monkeypatch, web_app, mapping, default: "str | None" = "93.184.216.34"):
+    """Make web_app's socket.getaddrinfo deterministic.
+
+    mapping: host -> ip string ("::1" for IPv6); default applies to any other
+    host; an ip of None raises gaierror (simulating an unresolvable host).
+    """
+    def _gai(host, *args, **kwargs):
+        ip = mapping.get(host, default)
+        if ip is None:
+            raise socket.gaierror("blocked in test")
+        if ":" in ip:
+            return [(socket.AF_INET6, socket.SOCK_STREAM, 6, "", (ip, 0, 0, 0))]
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 0))]
+    monkeypatch.setattr(web_app.socket, "getaddrinfo", _gai)
+
+
+# Confirmed vectors blocked WITHOUT any DNS lookup (guard steps 1-4): backslash/
+# percent differentials, userinfo, blocked names, and IP literals in every
+# notation. getaddrinfo is patched to RAISE to prove no network is consulted.
+SSRF_BLOCK_NO_DNS = [
+    r"http://127.0.0.1:6666\@arxiv.org",                # the GH #79 payload
+    "http://127.0.0.%31/", "http://%31%32%37.%30.%30.%31/", "http://0x7f.0.0.%31/",
+    "http://%32130706433/", "http://213070643%33/", "http://169.254.169.%32%35%34/",
+    "http://%31%36%39.254.169.254/", "http://192.168.0.%31/", "http://10.0.0.%31/",
+    "http://metadata.google.%69nternal/", "http://user@127.0.0.1/",
+    "http://127.0.0.1/", "http://localhost/", "http://169.254.169.254/",
+    "http://metadata.google.internal/", "http://10.0.0.1/", "http://192.168.1.1/",
+    "http://172.16.0.1/", "http://[::1]/", "http://2130706433/", "http://0177.0.0.1/",
+    "http://0x7f000001/", "http://127.1/", "http://0/", "http://[::ffff:127.0.0.1]/",
+    "http://[fe80::1]/", "http://0.0.0.0/", "http://[::ffff:169.254.169.254]/",
+    "http://x.internal/", "http://ip6-localhost/", "http://ip6-loopback/",
+]
+
+# Confirmed vectors that are PUBLIC NAMES resolving to a private/loopback IP —
+# only the resolve-and-revalidate step catches them. DNS is patched to the
+# private address the red-team observed for each.
+SSRF_BLOCK_VIA_DNS = {
+    "http://127.0.0.1.nip.io/": "127.0.0.1",
+    "http://anything.localtest.me/": "127.0.0.1",
+    "http://localtest.me/": "127.0.0.1",
+    "http://127-0-0-1.nip.io/": "127.0.0.1",
+    "http://7f000001.nip.io/": "127.0.0.1",
+    "http://app.127.0.0.1.nip.io/": "127.0.0.1",
+    "http://0.0.0.0.nip.io/": "0.0.0.0",
+}
+
+# Legitimate public sources that MUST stay allowed (incl. internationalised
+# domains, which the earlier urlparse-vs-urllib3 cross-check wrongly rejected).
+SSRF_ALLOW = [
+    "https://github.com/jimmc414/onefilellm",
+    "https://raw.githubusercontent.com/jimmc414/onefilellm/main/README.md",
+    "https://arxiv.org/abs/1706.03762", "https://arxiv.org/pdf/1706.03762",
+    "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "https://youtu.be/dQw4w9WgXcQ",
+    "https://docs.python.org/3/library/socket.html", "https://doi.org/10.1000/xyz",
+    "http://1.1.1.1/", "http://8.8.8.8/", "https://example.com/", "http://example.com./",
+    "https://github.com.", "https://medium.com/@author",
+    "https://github.com/a/b?x=user@example.com",
+    "https://münchen.de/seite", "https://россия.рф/", "https://xn--mnchen-3ya.de/seite",
+]
+
+
+def test_ssrf_issue79_payload_blocked(web_app_module):
+    """The exact GH #79 payload is rejected by the guard."""
+    assert web_app_module._is_safe_url(r"http://127.0.0.1:6666\@arxiv.org") is False
+
+
+@pytest.mark.parametrize("url", SSRF_BLOCK_NO_DNS)
+def test_ssrf_blocked_without_dns(url, web_app_module, monkeypatch):
+    """Differential/literal/blocked-name vectors are rejected even when DNS is
+    unavailable (proving they're caught before the resolve step)."""
+    _patch_getaddrinfo(monkeypatch, web_app_module, {}, default=None)  # any lookup raises
+    assert web_app_module._is_safe_url(url) is False
+
+
+@pytest.mark.parametrize("url,private_ip", list(SSRF_BLOCK_VIA_DNS.items()))
+def test_ssrf_public_name_resolving_to_private_blocked(url, private_ip, web_app_module, monkeypatch):
+    """A public hostname that resolves to a private/loopback IP is rejected."""
+    from urllib.parse import urlparse as _urlparse
+    host = _urlparse(url).hostname
+    _patch_getaddrinfo(monkeypatch, web_app_module, {host: private_ip})
+    assert web_app_module._is_safe_url(url) is False
+
+
+@pytest.mark.parametrize("url", SSRF_ALLOW)
+def test_ssrf_legit_sources_allowed(url, web_app_module, monkeypatch):
+    """Legitimate public sources (incl. IDN) are NOT over-blocked."""
+    _patch_getaddrinfo(monkeypatch, web_app_module, {}, default="93.184.216.34")  # all public
+    assert web_app_module._is_safe_url(url) is True
+
+
+def test_ssrf_resolve_failure_fails_open_but_literals_blocked(web_app_module, monkeypatch):
+    """On DNS failure the guard fails OPEN for names (offline use keeps working)
+    yet still blocks private IP literals (which need no resolution)."""
+    _patch_getaddrinfo(monkeypatch, web_app_module, {}, default=None)  # all lookups raise
+    assert web_app_module._is_safe_url("https://github.com/x") is True   # fail-open
+    assert web_app_module._is_safe_url("http://127.0.0.1/") is False     # literal still blocked
+
+
+def test_ssrf_stream_blocks_issue79_payload(client, web_app_module, monkeypatch):
+    """End-to-end: GET /stream with the #79 payload emits error(security)."""
+    _patch_getaddrinfo(monkeypatch, web_app_module, {}, default=None)
+    resp = client.get("/stream", query_string={"input": r"http://127.0.0.1:6666\@arxiv.org"})
+    body = resp.get_data(as_text=True)
+    assert "event: error" in body
+    assert '"subtype":"security"' in body
 
 
 if __name__ == "__main__":

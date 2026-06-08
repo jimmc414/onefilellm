@@ -15,7 +15,14 @@ import time
 import queue
 import threading
 import ipaddress
+import socket
 from urllib.parse import urlparse
+
+# requests is a core OneFileLLM dependency. Its PreparedRequest URL normaliser
+# yields the EXACT host the client connects to (percent-decoded and IDNA-encoded),
+# which is what _is_safe_url() validates — closing the parser/percent-encoding
+# SSRF differential reported in GH issue #79.
+import requests
 
 # Import functions from onefilellm.py. onefilellm.py lives at the repo root, but
 # `python extras/web_app.py` only puts extras/ on sys.path — so make the repo
@@ -58,22 +65,146 @@ APP_VERSION = None
 _job_lock = threading.Lock()
 
 
-def _is_safe_url(url: str) -> bool:
-    """Reject URLs targeting private/internal networks (SSRF protection)."""
+# Hostnames that denote the local/internal host without being IP literals (so a
+# pure-IP check would miss them). Includes the Debian/Ubuntu IPv6 loopback aliases
+# from /etc/hosts. Defence-in-depth on top of the resolve-and-revalidate step.
+_BLOCKED_HOSTNAMES = {
+    "localhost", "localhost.localdomain",
+    "localhost4", "localhost6", "ip6-localhost", "ip6-loopback", "ip6-localnet",
+    "metadata.google.internal",
+}
+
+
+def _is_blocked_ip(addr) -> bool:
+    """True if an ipaddress object is in a non-public (SSRF-sensitive) range."""
+    if (addr.is_private or addr.is_loopback or addr.is_link_local
+            or addr.is_reserved or addr.is_multicast or addr.is_unspecified):
+        return True
+    mapped = getattr(addr, "ipv4_mapped", None)
+    if mapped is not None and _is_blocked_ip(mapped):
+        return True
+    return False
+
+
+def _connection_host(url: str):
+    """Return the exact host requests will connect to (lowercased), or None.
+
+    ``requests.PreparedRequest.prepare_url`` percent-decodes and IDNA-encodes the
+    host into precisely the value handed to the connection pool. Validating THIS
+    host (not urlparse's raw host) is what closes the parser/percent-encoding
+    differential of GH #79 — e.g. ``http://127.0.0.%31/`` prepares to host
+    ``127.0.0.1`` — while correctly allowing internationalised domains
+    (``münchen.de`` -> ``xn--mnchen-3ya.de``).
+    """
     try:
+        prepared = requests.models.PreparedRequest()
+        prepared.prepare_url(url, None)
+    except Exception:
+        return None
+    host = urlparse(str(prepared.url)).hostname or ""
+    return host.strip("[]").strip(".").lower() or None
+
+
+def _host_ip_candidates(host):
+    """Return every IP address the given host string could denote (may be empty).
+
+    Catches IP literals in any form an HTTP client might accept so the SSRF range
+    checks can't be evaded by an alternate notation: standard dotted IPv4 + all
+    IPv6 forms (via ``ipaddress``), and the legacy decimal/octal/hex IPv4 forms
+    (via ``inet_aton``). A bare domain name yields no candidates.
+    """
+    candidates = []
+    # Strip an IPv6 scope/zone id ("fe80::1%eth0") before parsing.
+    bare = host.split("%", 1)[0] if "%" in host else host
+    try:
+        candidates.append(ipaddress.ip_address(bare))
+    except ValueError:
+        pass
+    # Legacy/alternate IPv4: decimal int, octal, hex, and short forms. inet_aton
+    # accepts these and rejects real domains (OSError), so a match means the host
+    # is an IPv4 literal in disguise.
+    try:
+        candidates.append(ipaddress.ip_address(socket.inet_ntoa(socket.inet_aton(bare))))
+    except (OSError, ValueError):
+        pass
+    return candidates
+
+
+def _resolved_addresses(host):
+    """Resolve a hostname to ipaddress objects (best-effort, never raises).
+
+    Returns an empty list on resolution failure — we fail OPEN, because a host we
+    cannot resolve cannot be connected to either (the fetch will simply error),
+    and that keeps offline/air-gapped use working. Catches public names that map
+    to internal IPs (e.g. ``*.nip.io``, ``localtest.me``, ``ip6-localhost``).
+    """
+    addrs = []
+    try:
+        for info in socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP):
+            try:
+                addrs.append(ipaddress.ip_address(info[4][0]))
+            except ValueError:
+                pass
+    except Exception:
+        pass
+    return addrs
+
+
+def _is_safe_url(url: str) -> bool:
+    """Reject URLs targeting private/internal networks (SSRF protection).
+
+    Hardened against the parser/percent-encoding differential of GH issue #79 and
+    the public-name-resolves-to-private class found by adversarial review. All
+    checks run before any content fetch:
+      1. Reject backslashes / control chars / whitespace (clients treat ``\\`` as
+         ``/`` and strip control bytes — differentials the validator can't see).
+      2. http(s) only; reject embedded ``user@host`` credentials/userinfo.
+      3. Validate the EXACT host requests will connect to (PreparedRequest, which
+         percent-decodes + IDNA-encodes), not urlparse's raw host.
+      4. Reject blocked hostnames and private/loopback/link-local/reserved/
+         multicast/unspecified IPs in ANY literal form (IPv4-mapped IPv6, and the
+         legacy decimal/octal/hex IPv4 notations).
+      5. Resolve the host and reject if ANY resolved address is non-public —
+         catching public names that map to internal IPs. Fails open on resolution
+         error so offline/unreachable use degrades gracefully.
+
+    Out of scope: DNS rebinding (a hostile resolver returning a public address
+    here and a private one at fetch time) — that needs connection pinning in the
+    HTTP layer. Every static case from the security review is covered.
+    """
+    try:
+        if not url:
+            return False
+
+        # 1) No backslashes, control characters, or whitespace anywhere in the URL.
+        if "\\" in url or any(ord(c) <= 0x20 or ord(c) == 0x7F for c in url):
+            return False
+
         parsed = urlparse(url)
-        hostname = parsed.hostname
-        if not hostname:
+
+        # 2) Absolute http(s) only; no embedded credentials/userinfo.
+        if parsed.scheme not in ("http", "https"):
             return False
-        # Reject common metadata endpoints and localhost
-        if hostname in ("localhost", "metadata.google.internal"):
+        if parsed.username is not None or parsed.password is not None or "@" in (parsed.netloc or ""):
             return False
-        try:
-            addr = ipaddress.ip_address(hostname)
-            if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
+
+        # 3) The exact host requests/urllib3 will dial (decoded + IDNA-normalised).
+        host = _connection_host(url)
+        if not host or "%" in host:
+            return False
+
+        # 4) Blocked names + IP literals (any notation).
+        if host in _BLOCKED_HOSTNAMES or host == "internal" or host.endswith(".internal"):
+            return False
+        for addr in _host_ip_candidates(host):
+            if _is_blocked_ip(addr):
                 return False
-        except ValueError:
-            pass  # hostname is a domain name, not an IP
+
+        # 5) Resolve and re-validate every address (public name -> private IP).
+        for addr in _resolved_addresses(host):
+            if _is_blocked_ip(addr):
+                return False
+
         return True
     except Exception:
         return False
