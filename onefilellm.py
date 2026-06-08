@@ -1282,9 +1282,16 @@ def process_web_pdf(url):
         return f"<error>Failed to process PDF: {escape_xml(str(e))}</error>"
 
 
-def crawl_and_extract_text(base_url, max_depth, include_pdfs, ignore_epubs):
+def crawl_and_extract_text(base_url, max_depth, include_pdfs, ignore_epubs, progress_callback=None):
     """
     Crawls a website starting from base_url, extracts text, and wraps in XML.
+
+    progress_callback: optional callable invoked once per page as
+        progress_callback(pages_done, pages_discovered, current_url). It is purely
+        advisory (live progress for the web app) and fully backward-compatible: all
+        existing callers omit it. It is wrapped in a guard so a faulty callback can
+        never break the crawl, and may return False to cooperatively request a
+        between-page stop (used by the web app's cancel flow).
     """
     if OFFLINE_MODE:
         msg = "Offline mode enabled; skipping web crawl"
@@ -1327,6 +1334,18 @@ def crawl_and_extract_text(base_url, max_depth, include_pdfs, ignore_epubs):
 
         print(f"Processing (Depth {current_depth}): {clean_url}")
         visited_urls.add(clean_url)
+
+        # Live progress hook for the web app (optional, backward-compatible).
+        # Guarded so a faulty callback can never break the crawl. A callback may
+        # return False to cooperatively request a between-page stop (web app cancel);
+        # any other return value (including None) continues the crawl normally.
+        if progress_callback is not None:
+            try:
+                if progress_callback(len(visited_urls), len(visited_urls) + len(urls_to_visit), clean_url) is False:
+                    break
+            except Exception:
+                pass
+
         page_content = f'\n<page url="{escape_xml(clean_url)}">' # Start page tag
 
         try:

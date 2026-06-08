@@ -1,67 +1,61 @@
-from flask import Flask, request, render_template_string, send_file, abort
+"""Conduit — Flask web app for OneFileLLM.
+
+Single-user localhost console that pipes any source into one LLM-ready file.
+See extras/redesign_onefilellm_webapp_py.md (design) and the build contract
+for the authoritative machine interface. Offline-safe, Flask-only dependency,
+templates/ and static/ are auto-served because Flask(__name__) roots at extras/.
+"""
+
+from flask import Flask, request, render_template, send_file, abort, Response
 import os
 import sys
+import re
+import json
+import time
+import queue
+import threading
 import ipaddress
 from urllib.parse import urlparse
 
-# Import functions from onefilellm.py.
-# Ensure onefilellm.py is accessible in the same directory.
+# Import functions from onefilellm.py. onefilellm.py lives at the repo root, but
+# `python extras/web_app.py` only puts extras/ on sys.path — so make the repo
+# root (this file's parent directory) importable before importing onefilellm.
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
 from onefilellm import process_github_repo, process_github_pull_request, process_github_issue
-from onefilellm import process_arxiv_pdf, process_local_folder, fetch_youtube_transcript
-from onefilellm import crawl_and_extract_text, process_doi_or_pmid, get_token_count, preprocess_text, safe_file_read
-from pathlib import Path
-import pyperclip
-from rich.console import Console
+from onefilellm import process_arxiv_pdf, fetch_youtube_transcript
+from onefilellm import crawl_and_extract_text, process_doi_or_pmid
+from onefilellm import get_token_count, preprocess_text, safe_file_read, TOKEN_ESTIMATE_MULTIPLIER
 
 app = Flask(__name__)
-console = Console()
 
 # Directory where output files are written; downloads are restricted to this directory.
 OUTPUT_DIR = os.path.abspath(".")
 
-# Allowed filenames that may be downloaded via /download.
+# Allowed filenames that may be downloaded via /download (and read via /result/raw).
 ALLOWED_DOWNLOAD_FILES = {"uncompressed_output.txt", "compressed_output.txt"}
 
-# Simple HTML template using inline rendering for demonstration.
-template = """
-<!DOCTYPE html>
-<html>
-<head>
-    <title>1FileLLM Web Interface</title>
-    <style>
-    body { font-family: sans-serif; margin: 2em; }
-    input[type="text"] { width: 80%; padding: 0.5em; }
-    .output-container { margin-top: 2em; }
-    .file-links { margin-top: 1em; }
-    pre { background: #f8f8f8; padding: 1em; border: 1px solid #ccc; }
-    </style>
-</head>
-<body>
-    <h1>1FileLLM Web Interface</h1>
-    <form method="POST" action="/">
-        <p>Enter a URL, DOI, or PMID:</p>
-        <input type="text" name="input_path" required placeholder="e.g. https://github.com/jimmc414/1filellm or 10.1234/example"/>
-        <button type="submit">Process</button>
-    </form>
+# Fixed output filenames (unchanged from the original implementation).
+UNCOMPRESSED_FILE = "uncompressed_output.txt"
+COMPRESSED_FILE = "compressed_output.txt"
 
-    {% if output %}
-    <div class="output-container">
-        <h2>Processed Output</h2>
-        <pre>{{ output }}</pre>
+# Bounded preview cap — the DOM never receives the full payload (contract §7.2).
+PREVIEW_CAP_BYTES = 262144  # 256 KB
 
-        <h3>Token Counts</h3>
-        <p>Uncompressed Tokens: {{ uncompressed_token_count }}<br>
-        Compressed Tokens: {{ compressed_token_count }}</p>
+# Node parse cap (contract §7.3).
+NODE_CAP = 2000
 
-        <div class="file-links">
-            <a href="/download?filename=uncompressed_output.txt">Download Uncompressed Output</a> |
-            <a href="/download?filename=compressed_output.txt">Download Compressed Output</a>
-        </div>
-    </div>
-    {% endif %}
-</body>
-</html>
-"""
+# Version string injected into the shell. There is no __version__ in onefilellm,
+# so this is intentionally None (the header version segment is hidden when absent).
+APP_VERSION = None
+
+# ---------------------------------------------------------------------------
+# Single-flight job lock. /stream acquires this non-blocking; if held, the new
+# request is rejected with a `busy` error event (contract §2.1).
+# ---------------------------------------------------------------------------
+_job_lock = threading.Lock()
 
 
 def _is_safe_url(url: str) -> bool:
@@ -85,71 +79,446 @@ def _is_safe_url(url: str) -> bool:
         return False
 
 
+# ---------------------------------------------------------------------------
+# Input shape detection (contract §7.4) — local-path / private-url guards.
+# ---------------------------------------------------------------------------
+# Local-path shapes that must never be fetched by the web app.
+_LOCAL_PATH_PREFIXES = ("/", "~", "./", "../", "file://")
+_WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:[\\/]")
+
+
+def _is_local_path(value: str) -> bool:
+    """True when input looks like a local/relative filesystem path (blocked)."""
+    if not value:
+        return False
+    if value.startswith(_LOCAL_PATH_PREFIXES):
+        return True
+    if _WINDOWS_DRIVE_RE.match(value):
+        return True
+    return False
+
+
+def _security_check(input_path):
+    """Run the security guards that must precede ANY fetch (contract §5).
+
+    Returns an error message string if the input must be blocked, else None.
+    Mirrors the dispatch guards in §7.4 steps 1-2.
+    """
+    # 1) Local/relative path shapes — rejected, never fetched.
+    if _is_local_path(input_path):
+        return "Local file paths aren't allowed in the web app. Use a URL instead."
+    # 2) http(s) URLs whose host fails the SSRF guard — rejected.
+    parsed = urlparse(input_path)
+    if parsed.scheme in ("http", "https"):
+        if not _is_safe_url(input_path):
+            return "URL rejected by security policy."
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Shared algorithms (contract §7.1 classify, §7.2 metrics, §7.3 nodes).
+# ---------------------------------------------------------------------------
+def classify(source_text):
+    """Classify the bare <source> string (contract §7.1). Do NOT naively regex <error>."""
+    # 1) Empty backstop — get_token_count strips ALL tags, so ~0 means no real content.
+    if get_token_count(source_text) < 5:
+        return ("empty", None)
+    # 2) Strip page/file subtrees, THEN look for a source-level <error>.
+    stripped = re.sub(r'<page\b[^>]*>.*?</page>', '', source_text, flags=re.DOTALL | re.IGNORECASE)
+    stripped = re.sub(r'<file\b[^>]*>.*?</file>', '', stripped, flags=re.DOTALL | re.IGNORECASE)
+    m = re.search(r'<error\b[^>]*>(.*?)</error>', stripped, flags=re.DOTALL | re.IGNORECASE)
+    if m:
+        return ("processing", m.group(1).strip())  # message = source-level error text
+    # 3) Otherwise success (a crawl with one timed-out <page> still counts as success).
+    return ("success", None)
+
+
+def parse_source_meta(source_text):
+    """Parse the opening <source …> tag for type and url/base_url (contract §7.3)."""
+    src_type = ""
+    src_url = ""
+    m = re.search(r'<source\b([^>]*)>', source_text, flags=re.IGNORECASE)
+    if m:
+        attrs = m.group(1)
+        tm = re.search(r'type="([^"]*)"', attrs, flags=re.IGNORECASE)
+        if tm:
+            src_type = tm.group(1)
+        um = re.search(r'url="([^"]*)"', attrs, flags=re.IGNORECASE)
+        if not um:
+            um = re.search(r'base_url="([^"]*)"', attrs, flags=re.IGNORECASE)
+        if um:
+            src_url = um.group(1)
+    return {"type": src_type, "url": src_url}
+
+
+def parse_nodes(source_text):
+    """Parse <file>/<page> nodes from the bare source_text (contract §7.3)."""
+    files = re.findall(r'<file\b[^>]*\bpath="([^"]*)"[^>]*>(.*?)</file>', source_text, re.DOTALL | re.IGNORECASE)
+    pages = re.findall(r'<page\b[^>]*\burl="([^"]*)"[^>]*>(.*?)</page>', source_text, re.DOTALL | re.IGNORECASE)
+    nodes = ([{"kind": "file", "name": n, "bytes": len(b.encode("utf-8")), "lines": b.count("\n")} for n, b in files]
+             + [{"kind": "page", "name": n, "bytes": len(b.encode("utf-8")), "lines": b.count("\n")} for n, b in pages])
+    node_count = len(nodes)
+    nodes_truncated = node_count > NODE_CAP
+    nodes = nodes[:NODE_CAP]
+    return nodes, node_count, nodes_truncated
+
+
+def compute_metrics(source_text):
+    """Wrap source_text, write both output files, compute metrics (contract §7.2)."""
+    wrapped = f"<onefilellm_output>\n{source_text}\n</onefilellm_output>"
+
+    # write wrapped → uncompressed_output.txt ; preprocess_text(...) → compressed_output.txt
+    with open(UNCOMPRESSED_FILE, "w", encoding="utf-8") as f:
+        f.write(wrapped)
+    preprocess_text(UNCOMPRESSED_FILE, COMPRESSED_FILE)
+
+    uncompressed_tokens = get_token_count(wrapped)
+    compressed_tokens = get_token_count(safe_file_read(COMPRESSED_FILE))
+    estimated_model_tokens = round(uncompressed_tokens * TOKEN_ESTIMATE_MULTIPLIER)
+
+    raw = wrapped.encode("utf-8")
+    total_bytes = len(raw)
+    output_kb = round(total_bytes / 1024, 2)
+
+    if total_bytes <= PREVIEW_CAP_BYTES:
+        preview = wrapped
+    else:
+        preview = raw[:PREVIEW_CAP_BYTES].decode("utf-8", errors="ignore")
+    preview_bytes = len(preview.encode("utf-8"))
+    truncated = total_bytes > preview_bytes
+
+    return {
+        "wrapped": wrapped,
+        "uncompressed_tokens": uncompressed_tokens,
+        "compressed_tokens": compressed_tokens,
+        "estimated_model_tokens": estimated_model_tokens,
+        "total_bytes": total_bytes,
+        "output_kb": output_kb,
+        "preview": preview,
+        "preview_bytes": preview_bytes,
+        "truncated": truncated,
+        "source_count": 1,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Detection + dispatch (contract §7.4). Returns (badge, fn) where fn(progress_cb)
+# runs the processor and returns the bare <source> string. Raises ValueError
+# only for blocked inputs (handled upstream via _security_check); here we assume
+# the security guard already passed.
+# ---------------------------------------------------------------------------
+def _dispatch(input_path):
+    """Return (detected_badge, runner) for a security-cleared input (contract §7.4).
+
+    `runner(progress_cb)` invokes the right processor and returns the bare source string.
+    Order matches §7.4 steps 3-10 (steps 1-2 are the security guard, handled separately).
+    """
+    parsed = urlparse(input_path)
+    is_http = parsed.scheme in ("http", "https")
+
+    if "github.com" in input_path:
+        if "/pull/" in input_path:
+            return ("github · pr", lambda cb: process_github_pull_request(input_path))
+        if "/issues/" in input_path:
+            return ("github · issue", lambda cb: process_github_issue(input_path))
+        return ("github · repo", lambda cb: process_github_repo(input_path))
+
+    if is_http and "arxiv.org" in input_path:
+        return ("arxiv", lambda cb: process_arxiv_pdf(input_path))
+
+    if is_http and ("youtube.com/watch" in input_path or "youtu.be/" in input_path):
+        return ("youtube · transcript", lambda cb: fetch_youtube_transcript(input_path))
+
+    if is_http:
+        def _crawl(cb):
+            crawl_result = crawl_and_extract_text(
+                input_path, max_depth=2, include_pdfs=True, ignore_epubs=True,
+                progress_callback=cb,
+            )
+            return crawl_result['content']
+        return ("docs · will crawl", _crawl)
+
+    if re.match(r'^10\.\d{4,9}/\S+$', input_path):
+        return ("doi · best-effort", lambda cb: process_doi_or_pmid(input_path))
+
+    if re.match(r'^\d+$', input_path):
+        return ("pmid · best-effort", lambda cb: process_doi_or_pmid(input_path))
+
+    # Nothing recognized — still attempt DOI/PMID style as a last resort to mirror
+    # the historical fallthrough; if it cannot be classified, surface as processing.
+    return ("", lambda cb: process_doi_or_pmid(input_path))
+
+
+# ---------------------------------------------------------------------------
+# Shared pipeline. Used by BOTH POST / (emit=None, synchronous) and the SSE
+# worker (emit pushes pre-formatted SSE strings via the queue).
+# ---------------------------------------------------------------------------
+def run_job(input_path, emit=None, cancel_event=None):
+    """Run the full pipeline for one input.
+
+    - emit(name, data): optional. When provided, called for stage/page/done/error
+      events. When None (POST path), the function instead RETURNS a result dict
+      (contract §1.2) and emits nothing.
+    - cancel_event: optional threading.Event for cooperative cancel (crawl only).
+
+    Security guard runs first on every path (contract §5). Returns the §1.2 result
+    dict on the POST path; on the SSE path returns None (events carry everything).
+    """
+    start = time.time()
+
+    def _t():
+        return round(time.time() - start, 1)
+
+    # --- Security guard before any fetch (contract §5 / §7.4 steps 1-2) ---
+    sec_msg = _security_check(input_path)
+    if sec_msg is not None:
+        if emit is not None:
+            emit("error", {"subtype": "security", "message": sec_msg})
+            return None
+        return {
+            "status": "security",
+            "message": sec_msg,
+            "detected": "blocked · local path" if _is_local_path(input_path) else "blocked · private url",
+        }
+
+    detected, runner = _dispatch(input_path)
+    is_crawl = detected == "docs · will crawl"
+
+    # --- detect stage ---
+    if emit is not None:
+        emit("stage", {"key": "detect", "label": f"detected input · {detected or 'identifier'}",
+                       "status": "done", "t": _t()})
+
+    # --- progress callback for the crawler (contract §6) ---
+    def _cb(done, discovered, url):
+        if cancel_event is not None and cancel_event.is_set():
+            return False  # cooperative cancel — crawl breaks between pages
+        if emit is not None:
+            emit("page", {"fetched": done, "max": discovered, "url": url})
+        return None  # continue
+
+    # --- fetch / crawl stage ---
+    if emit is not None:
+        stage_key = "crawl" if is_crawl else "fetch"
+        emit("stage", {"key": stage_key, "label": "crawling" if is_crawl else "fetching",
+                       "status": "active", "t": _t()})
+
+    source_text = runner(_cb)
+
+    if emit is not None:
+        stage_key = "crawl" if is_crawl else "fetch"
+        emit("stage", {"key": stage_key, "label": "crawled" if is_crawl else "fetched",
+                       "status": "done", "t": _t()})
+
+    # --- classify (contract §7.1) ---
+    status, err_message = classify(source_text)
+
+    if status == "empty":
+        if emit is not None:
+            emit("error", {"subtype": "empty",
+                           "message": "The source produced no extractable content."})
+            return None
+        return {"status": "empty",
+                "message": "The source produced no extractable content.",
+                "detected": detected}
+
+    if status == "processing":
+        if emit is not None:
+            emit("error", {"subtype": "processing", "message": err_message})
+            return None
+        return {"status": "processing", "message": err_message, "detected": detected}
+
+    # --- success: extract stage ---
+    if emit is not None:
+        emit("stage", {"key": "extract", "label": "extracting", "status": "done", "t": _t()})
+
+    # --- metrics + node parse (contract §7.2 / §7.3) ---
+    metrics = compute_metrics(source_text)
+
+    if emit is not None:
+        emit("stage", {"key": "tokenize", "label": "tokenizing", "status": "done", "t": _t()})
+
+    nodes, node_count, nodes_truncated = parse_nodes(source_text)
+    source_meta = parse_source_meta(source_text)
+
+    if emit is not None:
+        # Suppress the terminal done event if the client cancelled (contract §2.4).
+        if cancel_event is not None and cancel_event.is_set():
+            return None
+        emit("done", {
+            "status": "success",
+            "source_count": metrics["source_count"],
+            "uncompressed_tokens": metrics["uncompressed_tokens"],
+            "compressed_tokens": metrics["compressed_tokens"],
+            "estimated_model_tokens": metrics["estimated_model_tokens"],
+            "output_kb": metrics["output_kb"],
+            "elapsed_s": _t(),
+            "preview": metrics["preview"],
+            "preview_bytes": metrics["preview_bytes"],
+            "total_bytes": metrics["total_bytes"],
+            "truncated": metrics["truncated"],
+            "source": source_meta,
+            "nodes": nodes,
+            "node_count": node_count,
+            "nodes_truncated": nodes_truncated,
+        })
+        return None
+
+    # POST path success result dict (contract §1.2).
+    return {
+        "status": "success",
+        "preview": metrics["preview"],
+        "truncated": metrics["truncated"],
+        "preview_bytes": metrics["preview_bytes"],
+        "total_bytes": metrics["total_bytes"],
+        "uncompressed_tokens": metrics["uncompressed_tokens"],
+        "compressed_tokens": metrics["compressed_tokens"],
+        "estimated_model_tokens": metrics["estimated_model_tokens"],
+        "output_kb": metrics["output_kb"],
+        "message": None,
+        "detected": detected,
+    }
+
+
+# ---------------------------------------------------------------------------
+# SSE plumbing (contract §2, §3, §4).
+# ---------------------------------------------------------------------------
+def _format_sse(name, data):
+    """Format a single SSE message: event + compact one-line JSON data."""
+    return f"event: {name}\ndata: {json.dumps(data, separators=(',', ':'))}\n\n"
+
+
+def _put_block(q, name, data):
+    """Block-put a stage/done/error event (never dropped, contract §2.3)."""
+    q.put(_format_sse(name, data))
+
+
+def _put_drop(q, name, data):
+    """Drop-on-full put for page events (contract §2.3)."""
+    try:
+        q.put_nowait(_format_sse(name, data))
+    except queue.Full:
+        pass
+
+
+def _run_worker(input_path, q, cancel_event):
+    """SSE worker body (contract §2.1). Always sentinels the queue and releases the lock."""
+    def emit(name, data):
+        # Page events are always best-effort (drop-on-full). Once the client has
+        # disconnected (cancel_event set), the queue consumer is gone — so switch
+        # stage/done/error to drop-on-full too, otherwise a full queue would block
+        # this worker forever and never release _job_lock (wedging single-flight).
+        if name == "page" or cancel_event.is_set():
+            _put_drop(q, name, data)
+        else:
+            _put_block(q, name, data)
+
+    try:
+        run_job(input_path, emit=emit, cancel_event=cancel_event)
+    except Exception as e:
+        _put_block(q, "error", {"subtype": "internal", "message": str(e)})
+    finally:
+        q.put(None)            # sentinel — ALWAYS, guarantees the stream closes
+        _job_lock.release()
+
+
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
 @app.route("/", methods=["GET", "POST"])
 def index():
+    """GET → app shell (result=None). POST → synchronous no-JS fallback (contract §1.1/§1.2)."""
     if request.method == "POST":
         input_path = request.form.get("input_path", "").strip()
-
-        # Prepare filenames
-        output_file = "uncompressed_output.txt"
-        processed_file = "compressed_output.txt"
-        urls_list_file = "processed_urls.txt"
-
-        # Determine input type and process accordingly (mirroring logic from onefilellm.py main)
         try:
-            parsed = urlparse(input_path)
-
-            if "github.com" in input_path:
-                if not _is_safe_url(input_path):
-                    return render_template_string(template, output="Error: URL rejected by security policy.")
-                if "/pull/" in input_path:
-                    final_output = process_github_pull_request(input_path)
-                elif "/issues/" in input_path:
-                    final_output = process_github_issue(input_path)
-                else:
-                    final_output = process_github_repo(input_path)
-            elif parsed.scheme in ["http", "https"]:
-                if not _is_safe_url(input_path):
-                    return render_template_string(template, output="Error: URL rejected by security policy.")
-                if "youtube.com" in input_path or "youtu.be" in input_path:
-                    final_output = fetch_youtube_transcript(input_path)
-                elif "arxiv.org" in input_path:
-                    final_output = process_arxiv_pdf(input_path)
-                else:
-                    crawl_result = crawl_and_extract_text(input_path, max_depth=2, include_pdfs=True, ignore_epubs=True)
-                    final_output = crawl_result['content']
-                    with open(urls_list_file, 'w', encoding='utf-8') as urls_file:
-                        urls_file.write('\n'.join(crawl_result['processed_urls']))
-            elif (input_path.startswith("10.") and "/" in input_path) or input_path.isdigit():
-                final_output = process_doi_or_pmid(input_path)
-            else:
-                # Reject local path processing from the web app (C2: SSRF/path traversal)
-                return render_template_string(template, output="Error: Local path processing is not allowed via the web interface.")
-
-            # Write the uncompressed output
-            with open(output_file, "w", encoding="utf-8") as file:
-                file.write(final_output)
-
-            # Process the compressed output
-            preprocess_text(output_file, processed_file)
-
-            compressed_text = safe_file_read(processed_file)
-            compressed_token_count = get_token_count(compressed_text)
-
-            uncompressed_text = safe_file_read(output_file)
-            uncompressed_token_count = get_token_count(uncompressed_text)
-
-            # Copy to clipboard
-            pyperclip.copy(uncompressed_text)
-
-            return render_template_string(template,
-                                          output=final_output,
-                                          uncompressed_token_count=uncompressed_token_count,
-                                          compressed_token_count=compressed_token_count)
+            result = run_job(input_path, emit=None, cancel_event=None)
         except Exception as e:
-            return render_template_string(template, output=f"Error: {str(e)}")
+            result = {"status": "processing", "message": str(e), "detected": ""}
+        return render_template("index.html", result=result, version=APP_VERSION)
 
-    return render_template_string(template)
+    return render_template("index.html", result=None, version=APP_VERSION)
+
+
+@app.route("/stream")
+def stream():
+    """SSE progress endpoint (contract §1.3, §2, §3)."""
+    input_path = (request.args.get("input") or "").strip()
+
+    # 1) Single-flight lock — non-blocking. Busy → one error event, then terminate.
+    if not _job_lock.acquire(blocking=False):
+        def busy_gen():
+            yield ": connected\n\n"
+            yield _format_sse("error", {"subtype": "busy",
+                                        "message": "A job is already running — wait for it to finish."})
+        return _sse_response(busy_gen())
+
+    # 2) Security guard before any fetch — rejection → one error event, release lock.
+    sec_msg = _security_check(input_path)
+    if sec_msg is not None:
+        _job_lock.release()
+
+        def sec_gen():
+            yield ": connected\n\n"
+            yield _format_sse("error", {"subtype": "security", "message": sec_msg})
+        return _sse_response(sec_gen())
+
+    # 3) Accepted — spawn daemon worker draining a bounded queue.
+    q = queue.Queue(maxsize=1000)
+    cancel_event = threading.Event()
+    worker = threading.Thread(target=_run_worker, args=(input_path, q, cancel_event), daemon=True)
+    worker.start()
+
+    def generator():
+        try:
+            yield ": connected\n\n"
+            while True:
+                try:
+                    item = q.get(timeout=15)
+                except queue.Empty:
+                    yield ": keepalive\n\n"
+                    continue
+                if item is None:
+                    break
+                yield item
+        except GeneratorExit:
+            cancel_event.set()
+            raise
+        finally:
+            cancel_event.set()
+
+    return _sse_response(generator())
+
+
+def _sse_response(gen):
+    """Build the text/event-stream Response with exact headers (contract §3)."""
+    resp = Response(gen, mimetype="text/event-stream")
+    resp.headers["Cache-Control"] = "no-cache, no-transform"
+    resp.headers["X-Accel-Buffering"] = "no"
+    resp.headers["Connection"] = "keep-alive"
+    # Do NOT set Content-Length; do NOT apply compression.
+    return resp
+
+
+@app.route("/result/raw")
+def result_raw():
+    """Serve full whitelisted file text inline for client copy (contract §1.4)."""
+    which = request.args.get("which")
+    if which == "uncompressed":
+        filename = UNCOMPRESSED_FILE
+    elif which == "compressed":
+        filename = COMPRESSED_FILE
+    else:
+        abort(400)
+
+    safe_path = os.path.join(OUTPUT_DIR, filename)
+    if not os.path.isfile(safe_path):
+        abort(404)
+
+    text = safe_file_read(safe_path)
+    # mimetype="text/plain" — Flask appends "; charset=utf-8" itself. Passing the
+    # charset here too would double it ("text/plain; charset=utf-8; charset=utf-8"),
+    # violating the exact Content-Type required by the contract (§3).
+    return Response(text, mimetype="text/plain")
 
 
 @app.route("/download")
@@ -169,6 +538,7 @@ def download():
 
     return send_file(safe_path, as_attachment=True)
 
+
 if __name__ == "__main__":
-    # C3 fix: Never use debug=True in production; bind to localhost only
-    app.run(debug=False, host="127.0.0.1", port=5000)
+    # Bind to localhost only; threaded so a live SSE stream never blocks other endpoints.
+    app.run(host="127.0.0.1", port=5000, threaded=True, debug=False)

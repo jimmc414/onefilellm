@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html class="no-js" data-theme="dark" lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>onefilellm · Conduit</title>
+  <meta name="color-scheme" content="dark light">
+  <meta name="referrer" content="no-referrer">
+  <script>
+    /* Runs before styles.css to avoid FOUC. Swaps no-js->js and sets the theme. */
+    (function () {
+      var d = document.documentElement;
+      d.classList.remove('no-js');
+      d.classList.add('js');
+      try {
+        var stored = localStorage.getItem('ofllm-theme');
+        if (stored === 'light' || stored === 'dark') {
+          d.setAttribute('data-theme', stored);
+        } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
+          d.setAttribute('data-theme', 'light');
+        }
+        /* else keep the default dark from the markup */
+      } catch (e) { /* localStorage blocked — keep default theme */ }
+    })();
+  </script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+
+  <!-- ============================================================= -->
+  <!-- Inline SVG sprite (spec §9). Visually hidden; referenced via   -->
+  <!-- <svg><use href="#i-…"></use></svg> throughout the document.    -->
+  <!-- ============================================================= -->
+  <svg class="sprite" aria-hidden="true" focusable="false" width="0" height="0" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <symbol id="i-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 5h16M4 5l6 7v6l4 2v-8l6-7"/>
+      </symbol>
+      <symbol id="i-branch" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M6 3v12M6 21a2 2 0 100-4 2 2 0 000 4zM6 5a2 2 0 100-4 2 2 0 000 4zM18 9a2 2 0 100-4 2 2 0 000 4zM18 7c0 4-6 3-6 8"/>
+      </symbol>
+      <symbol id="i-merge" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M6 21a2 2 0 100-4 2 2 0 000 4zM6 5a2 2 0 100-4 2 2 0 000 4zM18 9a2 2 0 100-4 2 2 0 000 4zM6 17V7m0 0c0 6 6 4 6 0m6 2c0 6-6 4-6 8"/>
+      </symbol>
+      <symbol id="i-issue" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/>
+      </symbol>
+      <symbol id="i-doc" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M7 3h7l4 4v14H7zM14 3v4h4M10 13h6M10 17h6"/>
+      </symbol>
+      <symbol id="i-play" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="5" width="18" height="14" rx="3"/><path d="M11 9l4 3-4 3z" fill="currentColor" stroke="none"/>
+      </symbol>
+      <symbol id="i-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/>
+      </symbol>
+      <symbol id="i-link" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 15l6-6M10 6l1-1a4 4 0 015.7 5.7l-1 1M14 18l-1 1A4 4 0 017.3 13.3l1-1"/>
+      </symbol>
+      <symbol id="i-shield-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 3l7 3v5c0 5-3.5 8-7 10-3.5-2-7-5-7-10V6zM9.5 9.5l5 5M14.5 9.5l-5 5"/>
+      </symbol>
+      <symbol id="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20 14a8 8 0 11-9-11 6 6 0 009 11z"/>
+      </symbol>
+      <symbol id="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/>
+      </symbol>
+      <symbol id="i-spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 3a9 9 0 109 9"/>
+      </symbol>
+      <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M5 12.5l4.5 4.5L19 7"/>
+      </symbol>
+      <symbol id="i-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 6l6 6-6 6"/>
+      </symbol>
+      <symbol id="i-file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M7 3h7l4 4v14H7zM14 3v4h4"/>
+      </symbol>
+      <symbol id="i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h8"/>
+      </symbol>
+      <symbol id="i-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 3v12M8 11l4 4 4-4M5 21h14"/>
+      </symbol>
+      <symbol id="i-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>
+      </symbol>
+      <symbol id="i-warn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 4l9 16H3zM12 10v4M12 17.5v.5"/>
+      </symbol>
+    </defs>
+  </svg>
+
+  <!-- Skip link — first tab stop (spec §8.2) -->
+  <a class="skip-link" href="#cmd">Skip to input</a>
+
+  <div class="app">
+
+    <!-- ============================== HEADER (§4.1) ============================== -->
+    <header class="app__header">
+      <div class="app__brand">
+        <svg class="app__logo" role="img" aria-hidden="false" focusable="false" width="20" height="20" viewBox="0 0 24 24"><title>onefilellm</title><use href="#i-logo"></use></svg>
+        <span class="app__wordmark">onefilellm</span>
+      </div>
+      <span class="app__sep" aria-hidden="true">·</span>
+      <span id="net-status" class="net-status" aria-live="polite">
+        <span class="net-status__dot" aria-hidden="true"></span>
+        <span class="net-status__label" data-net-label>offline</span>
+      </span>
+      {% if version %}
+      <span class="app__sep" aria-hidden="true">·</span>
+      <span id="app-version" class="app__version">v{{ version }}</span>
+      {% else %}
+      <span id="app-version" class="app__version" hidden></span>
+      {% endif %}
+      <button id="theme-toggle" type="button" class="btn btn--ghost btn--icon theme-toggle" aria-pressed="false" aria-label="Switch to light theme">
+        <svg class="icon icon--moon" aria-hidden="true" focusable="false" viewBox="0 0 24 24"><use href="#i-moon"></use></svg>
+        <svg class="icon icon--sun" aria-hidden="true" focusable="false" viewBox="0 0 24 24"><use href="#i-sun"></use></svg>
+      </button>
+    </header>
+
+    <!-- ============================== PROMPT BAR (§4.2) ============================== -->
+    <div class="app__prompt">
+      <form id="prompt-form" class="prompt" method="POST" action="/" role="search">
+        <span class="prompt__glyph" aria-hidden="true">&gt;</span>
+        <span class="prompt__field">
+          <input
+            id="cmd"
+            class="prompt__input"
+            type="text"
+            name="input_path"
+            value="{{ submitted_input if submitted_input else '' }}"
+            placeholder="https://github.com/owner/repo"
+            autocomplete="off"
+            autocapitalize="off"
+            autocorrect="off"
+            spellcheck="false"
+            enterkeyhint="go"
+            aria-label="Source URL, DOI, or PMID to process"
+            aria-describedby="cmd-hint">
+        </span>
+        <span id="detected-badge" class="badge" aria-live="polite"></span>
+        <button id="history-btn" type="button" class="btn btn--ghost btn--icon prompt__history" aria-label="Recent inputs" aria-haspopup="menu" aria-expanded="false" hidden>
+          <svg class="icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24"><use href="#i-clock"></use></svg>
+        </button>
+        <button id="process-btn" type="submit" class="btn btn--primary prompt__submit" disabled>
+          <svg class="icon icon--play" aria-hidden="true" focusable="false" viewBox="0 0 24 24"><use href="#i-play"></use></svg>
+          <svg class="icon icon--spinner spin" aria-hidden="true" focusable="false" viewBox="0 0 24 24"><use href="#i-spinner"></use></svg>
+          <span class="prompt__submit-label">Process</span>
+        </button>
+      </form>
+      <div id="history-popover" class="popover" role="menu" aria-label="Recent inputs" hidden></div>
+      <p id="cmd-hint" class="prompt__hint">Paste a GitHub repo, ArXiv, YouTube, docs site, DOI, or PMID — Enter to run.</p>
+    </div>
+
+    <!-- ============================== TRANSCRIPT (§4 / §5) ============================== -->
+    <main id="transcript" class="app__transcript" data-view="{{ 'result' if result else 'empty' }}">
+
+      <!-- ----- EMPTY STATE (§4.7) ----- -->
+      <section id="empty-state" class="empty" aria-labelledby="empty-h">
+        <h1 id="empty-h" class="empty__headline">What do you want to flatten into one file?</h1>
+        <p class="empty__subhead">Paste any of these above and press Enter. Click a card to try it.</p>
+        <div id="empty-gallery" class="empty__gallery">
+          <div class="empty__card" role="button" tabindex="0" data-fill="https://github.com/jimmc414/onefilellm">
+            <svg class="icon empty__card-icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24"><use href="#i-branch"></use></svg>
+            <span class="empty__card-type">GitHub repo</span>
+            <span class="empty__card-ex">https://github.com/jimmc414/onefilellm</span>
+          </div>
+          <div class="empty__card" role="button" tabindex="0" data-fill="https://github.com/jimmc414/onefilellm/pull/73">
+            <svg class="icon empty__card-icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24"><use href="#i-merge"></use></svg>
+            <span class="empty__card-type">GitHub PR</span>
+            <span class="empty__card-ex">https://github.com/jimmc414/onefilellm/pull/73</span>
+          </div>
+          <div class="empty__card" role="button" tabindex="0" data-fill="https://github.com/jimmc414/onefilellm/issues/72">
+            <svg class="icon empty__card-icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24"><use href="#i-issue"></use></svg>
+            <span class="empty__card-type">GitHub issue</span>
+            <span class="empty__card-ex">https://github.com/jimmc414/onefilellm/issues/72</span>
+          </div>
+          <div class="empty__card" role="button" tabindex="0" data-fill="https://arxiv.org/abs/2401.00001">
+            <svg class="icon empty__card-icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24"><use href="#i-doc"></use></svg>
+            <span class="empty__card-type">ArXiv</span>
+            <span class="empty__card-ex">https://arxiv.org/abs/2401.00001</span>
+          </div>
+          <div class="empty__card" role="button" tabindex="0" data-fill="https://www.youtube.com/watch?v=mFLlVpnGpds">
+            <svg class="icon empty__card-icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24"><use href="#i-play"></use></svg>
+            <span class="empty__card-type">YouTube</span>
+            <span class="empty__card-ex">https://www.youtube.com/watch?v=mFLlVpnGpds</span>
+          </div>
+          <div class="empty__card" role="button" tabindex="0" data-fill="https://docs.python.org/3/">
+            <svg class="icon empty__card-icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24"><use href="#i-globe"></use></svg>
+            <span class="empty__card-type">Docs site</span>
+            <span class="empty__card-ex">https://docs.python.org/3/</span>
+          </div>
+          <div class="empty__card" role="button" tabindex="0" data-fill="10.1038/s41586-021-03819-2">
+            <svg class="icon empty__card-icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24"><use href="#i-link"></use></svg>
+            <span class="empty__card-type">DOI</span>
+            <span class="empty__card-ex">10.1038/s41586-021-03819-2</span>
+          </div>
+          <div class="empty__card" role="button" tabindex="0" data-fill="38122860">
+            <svg class="icon empty__card-icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24"><use href="#i-link"></use></svg>
+            <span class="empty__card-type">PMID</span>
+            <span class="empty__card-ex">38122860</span>
+          </div>
+        </div>
+        <p class="empty__footnote">Local file paths and private/internal URLs are blocked by the security policy.</p>
+      </section>
+
+      <!-- ----- PROCESSING STATE (§4.4 / §5.4–5.5) ----- -->
+      <section id="processing-state" class="processing" role="status" aria-live="polite" aria-atomic="false">
+        <div class="processing__head">
+          <h2 id="proc-title" class="processing__title">Processing</h2>
+          <span id="elapsed" class="processing__elapsed" aria-hidden="true">0:00</span>
+          <button id="cancel-btn" type="button" class="btn btn--danger-ghost" title="Stops listening; a running crawl may finish in the background.">Cancel</button>
+        </div>
+        <div id="progress-bar" class="progress" role="progressbar" aria-label="Processing progress" aria-valuemin="0" aria-valuemax="100">
+          <div id="progress-fill" class="progress__fill"></div>
+          <span id="progress-label" class="progress__label" hidden></span>
+        </div>
+        <ol id="stage-log" class="stage-log" aria-label="Processing stages"></ol>
+      </section>
+
+      <!-- ----- RESULT STATE (§4.5 / §5.6) ----- -->
+      <section id="result-state" class="result" aria-labelledby="result-h">
+        <div class="result__head">
+          <h2 id="result-h" class="result__title" tabindex="-1">Result</h2>
+          <span id="result-summary" class="result__summary"></span>
+        </div>
+
+        <div id="metrics" class="metrics" role="group" aria-label="Output metrics">
+          <div class="metric metric--hero">
+            <span id="m-estimated" class="metric__value" aria-label="Estimated model tokens">—</span>
+            <span class="metric__caption">Estimated model tokens · incl. overhead</span>
+          </div>
+          <div class="metric">
+            <span id="m-uncompressed" class="metric__value metric__value--sub" aria-label="Uncompressed tokens">—</span>
+            <span class="metric__caption">Uncompressed tokens (tiktoken)</span>
+          </div>
+          <div class="metric">
+            <span id="m-compressed" class="metric__value metric__value--sub" aria-label="Compressed tokens">—</span>
+            <span class="metric__caption">Compressed tokens <span id="m-compressed-delta" class="metric__delta"></span></span>
+          </div>
+          <div class="metric">
+            <span id="m-size" class="metric__value metric__value--sub" aria-label="Output size">—</span>
+            <span class="metric__caption">Output size</span>
+          </div>
+          <div class="metric">
+            <span id="m-sources" class="metric__value metric__value--sub" aria-label="Sources processed">—</span>
+            <span class="metric__caption">Sources processed</span>
+          </div>
+          <div class="metric">
+            <span id="m-elapsed" class="metric__value metric__value--sub" aria-label="Elapsed">—</span>
+            <span class="metric__caption">Elapsed</span>
+          </div>
+        </div>
+
+        <div class="overview">
+          <div class="overview__head">
+            <h3 class="overview__title">Overview</h3>
+            <span id="overview-count" class="overview__count"></span>
+            <div id="view-toggle" class="view-toggle" role="tablist" aria-label="Result view">
+              <button id="tab-overview" class="view-toggle__tab" role="tab" aria-selected="true" aria-controls="panel-overview" tabindex="0">Overview</button>
+              <button id="tab-raw" class="view-toggle__tab" role="tab" aria-selected="false" aria-controls="panel-raw" tabindex="-1">Raw</button>
+            </div>
+          </div>
+
+          <div id="panel-overview" class="panel" role="tabpanel" aria-labelledby="tab-overview" tabindex="0">
+            <div id="tree" class="tree" role="tree" aria-label="Output structure"></div>
+          </div>
+
+          <div id="panel-raw" class="panel" role="tabpanel" aria-labelledby="tab-raw" tabindex="0" hidden>
+            <figure id="preview" class="preview">
+              <figcaption class="preview__caption">first 256 KB</figcaption>
+              <div class="preview__well">
+                <pre id="preview-code" class="preview__code"><code></code></pre>
+                <div id="preview-notice" class="preview__notice" hidden></div>
+              </div>
+            </figure>
+          </div>
+        </div>
+
+        <div id="actions" class="actions" role="group" aria-label="Copy and download output">
+          <button id="copy-uncompressed" type="button" class="btn btn--ghost btn--stacked" data-which="uncompressed">
+            <svg class="icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24"><use href="#i-copy"></use></svg>
+            <span class="btn__lines"><span class="btn__action">Copy</span><span class="btn__caption">uncompressed</span></span>
+          </button>
+          <button id="copy-compressed" type="button" class="btn btn--ghost btn--stacked" data-which="compressed">
+            <svg class="icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24"><use href="#i-copy"></use></svg>
+            <span class="btn__lines"><span class="btn__action">Copy</span><span class="btn__caption">compressed</span></span>
+          </button>
+          <span class="actions__divider" aria-hidden="true"></span>
+          <a id="download-uncompressed" class="btn btn--secondary btn--stacked" download href="/download?filename=uncompressed_output.txt">
+            <svg class="icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24"><use href="#i-download"></use></svg>
+            <span class="btn__lines"><span class="btn__action">Download</span><span class="btn__caption">.txt</span></span>
+          </a>
+          <a id="download-compressed" class="btn btn--secondary btn--stacked" download href="/download?filename=compressed_output.txt">
+            <svg class="icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24"><use href="#i-download"></use></svg>
+            <span class="btn__lines"><span class="btn__action">Download</span><span class="btn__caption">.txt</span></span>
+          </a>
+        </div>
+      </section>
+
+      <!-- ----- ERROR STATE (§4.6 / §5.7–5.9) ----- -->
+      <section id="error-state" class="error" data-error="processing" aria-labelledby="error-heading">
+        <div class="error__card">
+          <svg id="error-icon" class="error__icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24"><use href="#i-warn"></use></svg>
+          <div class="error__body">
+            <h2 id="error-heading" class="error__heading">Couldn't process that source</h2>
+            <p id="error-message" class="error__message" role="alert"></p>
+            <p id="error-hint" class="error__hint" hidden></p>
+            <div class="error__actions">
+              <button id="error-retry" type="button" class="btn btn--primary">Retry</button>
+              <button id="error-edit" type="button" class="btn btn--ghost">Edit input</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ----- NO-JS POST FALLBACK (§1.2 / §8.4) ----- -->
+      {% if result %}
+      <section id="noscript-result" class="noscript-result">
+        {% if result.status == 'success' %}
+        <div class="result__head">
+          <h2 class="result__title">Result</h2>
+          {% if result.detected %}<span class="result__summary">{{ result.detected }}</span>{% endif %}
+        </div>
+        <p class="noscript-result__metrics">
+          Estimated model tokens: {{ result.estimated_model_tokens }}<br>
+          Uncompressed tokens: {{ result.uncompressed_tokens }}<br>
+          Compressed tokens: {{ result.compressed_tokens }}<br>
+          Output size: {{ result.output_kb }} KB
+        </p>
+        {% if result.truncated %}
+        <p class="noscript-result__notice">Showing the first {{ result.preview_bytes }} bytes of {{ result.total_bytes }} — download for the complete output.</p>
+        {% endif %}
+        <pre class="noscript-result__pre"><code>{{ result.preview }}</code></pre>
+        <p class="noscript-result__links">
+          <a download href="/download?filename=uncompressed_output.txt">Download uncompressed output</a>
+          &nbsp;·&nbsp;
+          <a download href="/download?filename=compressed_output.txt">Download compressed output</a>
+        </p>
+        {% elif result.status == 'security' %}
+        <div class="error__card" data-error="security">
+          <h2 class="error__heading">Blocked by the security policy</h2>
+          <p class="error__message">{{ result.message if result.message else 'That address is local, private, or internal, so the web app will not fetch it.' }}</p>
+        </div>
+        {% elif result.status == 'empty' %}
+        <div class="error__card" data-error="empty">
+          <h2 class="error__heading">Nothing to show</h2>
+          <p class="error__message">{{ result.message if result.message else 'The source was reached but produced no extractable content.' }}</p>
+        </div>
+        {% else %}
+        <div class="error__card" data-error="processing">
+          <h2 class="error__heading">Couldn't process that source</h2>
+          <p class="error__message">{{ result.message if result.message else 'An error occurred while processing the input.' }}</p>
+        </div>
+        {% endif %}
+      </section>
+      {% endif %}
+
+    </main>
+
+    <footer class="app__footer">
+      <span class="app__footer-hint">Press <kbd>/</kbd> to focus the input · <kbd>Alt</kbd>+<kbd>T</kbd> to switch theme</span>
+    </footer>
+  </div>
+
+  <!-- Toast (§4.8) -->
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <!-- Scripts: deferred, in order (contract §8.1) -->
+  <script src="{{ url_for('static', filename='detect.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='sse.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+</body>
+</html>
